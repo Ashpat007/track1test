@@ -1,5 +1,5 @@
 """
-Automated Integration Test: Guardrails Spending Cap Enforcement.
+Automated Integration Test: Guardrails Spending Cap & Cumulative Session Spend Enforcement.
 """
 
 import sys
@@ -40,6 +40,29 @@ def test_guardrail_engine_direct_spending_cap_breach():
     
     assert res.passed is False
     assert "exceeds single action spending cap" in res.rejection_reason
+
+def test_cumulative_session_spend_breach():
+    engine = GuardrailEngine(max_single_action_inr=500.0, max_session_spend_inr=600.0)
+    # First purchase under budget (₹400)
+    res1 = engine.evaluate_proposal(
+        product_id="tea-001",
+        product_name="Kahwa",
+        total_amount_inr=400.0,
+        quantity=1,
+        current_session_spent_inr=0.0
+    )
+    assert res1.passed is True
+
+    # Second purchase (₹300), bringing cumulative spend to ₹700 (exceeds ₹600 cap)
+    res2 = engine.evaluate_proposal(
+        product_id="tea-002",
+        product_name="Chamomile",
+        total_amount_inr=300.0,
+        quantity=1,
+        current_session_spent_inr=400.0
+    )
+    assert res2.passed is False
+    assert "exceeds maximum session budget cap" in res2.rejection_reason
 
 def test_agent_spending_cap_breach():
     agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=100.0, gating_mode="AUTO_APPROVE")

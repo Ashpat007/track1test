@@ -4,9 +4,13 @@ Orchestrates: Catalog Fetch -> LLM Reasoning -> Guardrail Evaluation -> Gating C
 Supports multi-product cart selections (e.g. 2x Kahwa + 1x Matcha).
 """
 
+import os
 import uuid
+import hmac
+import hashlib
 from typing import Dict, Any, Optional, List
 from rich.console import Console
+from dotenv import load_dotenv
 
 from buyer_agent.client import MerchantClient
 from buyer_agent.llm_reasoner import LLMReasoner
@@ -14,6 +18,7 @@ from guardrails.engine import GuardrailEngine
 from guardrails.gating import GatingCheckpoint
 from guardrails.audit import AuditLogger
 
+load_dotenv()
 console = Console()
 
 
@@ -33,6 +38,8 @@ class BuyerAgent:
         self.gating = GatingCheckpoint(mode=gating_mode)
         self.llm_reasoner = LLMReasoner()
         self.spending_cap_inr = spending_cap_inr
+        # Cumulative session spend tracking
+        self.session_spent_inr = 0.0
 
     def execute_purchase_goal(
         self,
@@ -131,12 +138,14 @@ class BuyerAgent:
                 details={"items": cart_input_items, "reasoning_source": choice.reasoning_source}
             )
 
+            # Pass current_session_spent_inr into Guardrail Engine for cumulative session spend enforcement
             eval_res = self.guardrail_engine.evaluate_proposal(
                 product_id=item_details_list[0]["product_id"],
                 product_name=summary_names,
                 total_amount_inr=total_amount,
                 quantity=sum([i["quantity"] for i in item_details_list]),
-                currency="INR"
+                currency="INR",
+                current_session_spent_inr=self.session_spent_inr
             )
 
             if not eval_res.passed:
@@ -223,7 +232,7 @@ class BuyerAgent:
 
             except Exception as e:
                 err_str = str(e)
-                if "STOCKOUT_ERROR" in err_str or "409" in err_str:
+                if "STOCKOUT_ERROR" in err_str or "409" in err_str or "Insufficient stock" in err_str:
                     console.print(f"[bold yellow]⚠️ Stockout encountered. Triggering failure recovery...[/bold yellow]")
                     logger.log_step(
                         "FAILURE_HANDLED",
@@ -233,7 +242,10 @@ class BuyerAgent:
                         outcome_status="STOCKOUT_RECOVERED",
                         details={"error": err_str}
                     )
-                    excluded_product_ids.append(cart_input_items[0]["product_id"])
+                    # Exclude all products in the failing cart bundle to avoid infinite retries on multi-item stockouts
+                    for item in cart_input_items:
+                        if item["product_id"] not in excluded_product_ids:
+                            excluded_product_ids.append(item["product_id"])
                     continue
                 else:
                     logger.log_step(
@@ -245,9 +257,9 @@ class BuyerAgent:
                     )
                     return {"success": False, "status": "CHECKOUT_FAILED", "error": err_str, "session_id": session_id}
 
+            # Generate HMAC SHA256 signature for test simulation
             simulated_payment_id = f"pay_{uuid.uuid4().hex[:10]}"
-            import hmac, hashlib
-            key_secret = "sr5phj3GIj2gWBIRTmunq8Nh"
+            key_secret = os.getenv("RAZORPAY_KEY_SECRET", "sr5phj3GIj2gWBIRTmunq8Nh")
             sig = hmac.new(
                 bytes(key_secret, 'utf-8'),
                 bytes(f"{rzp_order_id}|{simulated_payment_id}", 'utf-8'),
@@ -262,6 +274,9 @@ class BuyerAgent:
             )
 
             if pay_res.get("success"):
+                # Accumulate successful session spend
+                self.session_spent_inr += total_amount
+
                 logger.log_step(
                     "PAYMENT_EXECUTION",
                     agent_goal=agent_goal,
@@ -273,8 +288,8 @@ class BuyerAgent:
                     gate_status="APPROVED",
                     razorpay_order_id=rzp_order_id,
                     razorpay_payment_id=simulated_payment_id,
-                    outcome_status="SUCCESS",
-                    details={"order_details": pay_res}
+                    outcome_status="SIMULATED_TEST_SUCCESS",
+                    details={"order_details": pay_res, "verification_mode": "SIMULATED_TEST_SIGNATURE"}
                 )
 
                 remaining_bal = self.spending_cap_inr - total_amount
@@ -283,10 +298,11 @@ class BuyerAgent:
                 console.print(f"[bold cyan]Items Purchased:[/bold cyan]\n  " + "\n  ".join([f"• {i['quantity']}x {i['product_name']} ({i.get('variant_name') or 'Standard'}) — ₹{i['subtotal_inr']:.2f}" for i in item_details_list]))
                 console.print(f"[bold cyan]Total Amount Paid:[/bold cyan] [bold green]₹{total_amount:.2f}[/bold green]")
                 console.print(f"[bold cyan]Spending Cap Limit:[/bold cyan] ₹{self.spending_cap_inr:.2f}")
+                console.print(f"[bold cyan]Cumulative Session Spent:[/bold cyan] ₹{self.session_spent_inr:.2f}")
                 console.print(f"[bold cyan]Remaining Cap Balance:[/bold cyan] [bold yellow]₹{remaining_bal:.2f}[/bold yellow]")
                 console.print(f"[bold cyan]Reasoning Engine:[/bold cyan] [bold magenta]{choice.reasoning_source}[/bold magenta]")
-                console.print(f"[bold cyan]Razorpay Order ID:[/bold cyan] {rzp_order_id}")
-                console.print(f"[bold cyan]Razorpay Payment ID:[/bold cyan] {simulated_payment_id}")
+                console.print(f"[bold cyan]Razorpay Order ID (Real API):[/bold cyan] {rzp_order_id}")
+                console.print(f"[bold cyan]Razorpay Payment ID (Test Sim):[/bold cyan] {simulated_payment_id}")
 
                 return {
                     "success": True,
@@ -295,9 +311,11 @@ class BuyerAgent:
                     "summary_names": summary_names,
                     "amount_inr": total_amount,
                     "remaining_balance_inr": remaining_bal,
+                    "session_spent_inr": self.session_spent_inr,
                     "razorpay_order_id": rzp_order_id,
                     "razorpay_payment_id": simulated_payment_id,
                     "reasoning_source": choice.reasoning_source,
+                    "verification_mode": "SIMULATED_TEST_SIGNATURE",
                     "audit_session_id": session_id
                 }
             else:
