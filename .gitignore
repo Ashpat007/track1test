@@ -1,0 +1,26 @@
+# Environment variables (SECURITY NOTICE: Never commit real API keys)
+.env
+.env.local
+
+# SQLite Database
+*.db
+agentic_commerce.db
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest Cache
+.pytest_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# IDE Configuration
+.idea/
+.vscode/
+*.swp
+.DS_Store
