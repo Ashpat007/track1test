@@ -55,10 +55,13 @@ class CartResponse(BaseModel):
     currency: str = "INR"
     is_valid_for_checkout: bool
     validation_message: str
+    created_at_timestamp: Optional[float] = None
+    expires_at_timestamp: Optional[float] = None
 
 class CheckoutCreateOrderInput(BaseModel):
     cart_id: str
     buyer_name: str = "AI Buyer Agent"
+    idempotency_key: Optional[str] = None
     delivery_notes: Optional[str] = None
 
 class CheckoutOrderResponse(BaseModel):
@@ -69,6 +72,7 @@ class CheckoutOrderResponse(BaseModel):
     currency: str = "INR"
     status: str
     items: List[CartItemDetail]
+    idempotency_key: Optional[str] = None
 
 class PaymentVerificationInput(BaseModel):
     order_id: str
@@ -86,8 +90,14 @@ class AgentSpecResponse(BaseModel):
     api_version: str = "1.0.0"
     merchant_name: str = "Aura Artisan Teas & Botanicals"
     agent_readability: str = "FULL_DECISION_BOUNDED"
-    supported_actions: List[str] = ["GET /catalog", "GET /agent-spec", "POST /cart", "POST /checkout/create-order", "POST /checkout/verify-payment"]
+    supported_actions: List[str] = [
+        "GET /catalog", "GET /agent-spec", "POST /cart", "POST /cart/{cart_id}/expire",
+        "POST /checkout/create-order", "POST /checkout/verify-payment",
+        "POST /api/agent-halt", "POST /api/agent-resume", "GET /api/agent-status"
+    ]
     currency: str = "INR"
     price_unit: str = "RUPEES"
     stock_reservation_minutes: int = 15
     gating_required: bool = True
+    idempotency_supported: bool = True
+    kill_switch_enabled: bool = True

@@ -1,7 +1,6 @@
 """
-Headless Demo Runner for Agentic Commerce.
-Runs Scenario 1 (Happy Path), Scenario 2 (Guardrail Block), and Scenario 3 (Stockout Recovery) automatically.
-Prints rich output and SQL Audit logs to terminal.
+Headless Batch Multi-Persona Agent Benchmark Runner.
+Executes synthetic buyer personas autonomously through the Merchant API, Guardrails Engine, and Audit Logger at scale.
 """
 
 import sys
@@ -9,133 +8,142 @@ import os
 import time
 import threading
 import uvicorn
+from typing import List, Dict, Any
 from rich.console import Console
+from rich.table import Table
 from rich.panel import Panel
-
-# Set stdout encoding for Windows
-if sys.stdout.encoding != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from merchant_api.app import app as merchant_app
 from buyer_agent.agent import BuyerAgent
-from buyer_agent.client import MerchantClient
-from guardrails.audit import AuditLogger
 
-console = Console(force_terminal=True)
-SERVER_PORT = 8000
+SERVER_PORT = 8003
 SERVER_URL = f"http://127.0.0.1:{SERVER_PORT}"
+console = Console()
 
 
-def start_merchant_server():
+def start_server():
     config = uvicorn.Config(merchant_app, host="127.0.0.1", port=SERVER_PORT, log_level="warning")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     time.sleep(1.5)
-    return server
 
 
-def print_audit_trail(session_id: str):
-    logger = AuditLogger(session_id=session_id)
-    history = logger.get_session_history()
-
-    console.print()
-    console.print(Panel(f"[bold gold1]📋 DURABLE SQL AUDIT TRAIL TIMELINE — Session ID: {session_id}[/bold gold1]", border_style="gold1"))
-
-    step_icons = {
-        "CATALOG_SEARCH": "🔍",
-        "LLM_REASONING": "🧠",
-        "GUARDRAIL_EVALUATION": "🛡️",
-        "USER_GATING": "🛑",
-        "PAYMENT_EXECUTION": "💳",
-        "FAILURE_HANDLED": "⚠️"
-    }
-
-    for idx, r in enumerate(history, 1):
-        icon = step_icons.get(r["step_type"], "📌")
-        stype = r["step_type"]
-        g_pass = "[bold green]PASS[/bold green]" if r["guardrail_passed"] else "[bold red]BLOCKED[/bold red]"
-        gate_status = r["gate_status"]
-        outcome = r["outcome_status"]
-
-        lines = [
-            f"[bold cyan]Step {idx}: {icon} {stype}[/bold cyan]",
-            f"  [bold white]Action:[/bold white] {r['proposed_action'] or 'Executed endpoint call'}"
-        ]
-
-        if r["llm_reasoning"]:
-            lines.append(f"  [bold yellow]LLM Reasoning:[/bold yellow] [italic]{r['llm_reasoning']}[/italic]")
-        
-        if r["proposed_amount_inr"]:
-            lines.append(f"  [bold green]Proposed Amount:[/bold green] ₹{r['proposed_amount_inr']:.2f}")
-
-        lines.append(f"  [bold magenta]Guardrail Evaluation:[/bold magenta] {g_pass} ({r['guardrail_message'] or 'Rules satisfied'})")
-
-        if gate_status != "N/A":
-            lines.append(f"  [bold red]Gating Checkpoint:[/bold red] {gate_status}")
-
-        if r["razorpay_order_id"]:
-            lines.append(f"  [bold cyan]Razorpay Order ID:[/bold cyan] {r['razorpay_order_id']}")
-
-        lines.append(f"  [bold green]Step Outcome:[/bold green] [bold white]{outcome}[/bold white]")
-
-        panel_color = "green" if outcome in ["SUCCESS", "PASSED", "APPROVED"] else ("yellow" if "PROPOSED" in outcome else "red")
-        console.print(Panel("\n".join(lines), border_style=panel_color, expand=False))
-        console.print()
-
-
-def main():
-    console.print("[dim]Starting local FastAPI Merchant Server...[/dim]")
-    start_merchant_server()
-
+def run_headless_benchmark():
+    console.clear()
     console.print(Panel.fit(
-        "[bold green]AURA ARTISAN TEAS & BOTANICALS — DEMO SUITE[/bold green]\n"
-        "[italic cyan]Agent-Readable Commerce API & Autonomous Machine-to-Machine Payments[/italic cyan]\n"
-        "[yellow]Razorpay AI Buildathon — Track 01[/yellow]",
-        border_style="green"
+        "[bold cyan]⚡ HEADLESS MULTI-PERSONA BUYER AGENT BENCHMARK[/bold cyan]\n"
+        "[dim]Simulating 6 Synthetic Buyer Personas at Scale via REST API[/dim]",
+        border_style="cyan"
     ))
 
-    # Scenario 1: Happy Path
-    console.print("\n=======================================================")
-    console.print("[bold green]SCENARIO 1: Successful Purchase Flow[/bold green]")
-    console.print("[yellow]Goal:[/yellow] 'Get a caffeine-free tea under ₹500'")
-    console.print("=======================================================")
-    
-    agent1 = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=500.0, gating_mode="AUTO_APPROVE")
-    res1 = agent1.execute_purchase_goal("Get a caffeine-free tea under ₹500")
-    print_audit_trail(res1.get("session_id", res1.get("audit_session_id")))
+    start_server()
 
-    # Scenario 2: Guardrail Block
-    console.print("\n=======================================================")
-    console.print("[bold red]SCENARIO 2: Guardrail Spending Cap Breach Block[/bold red]")
-    console.print("[yellow]Goal:[/yellow] 'Buy Japanese Ceremonial Matcha Grade-A' (Cap: ₹100)")
-    console.print("=======================================================")
-    
-    agent2 = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=100.0, gating_mode="AUTO_APPROVE")
-    res2 = agent2.execute_purchase_goal("Buy Japanese Ceremonial Matcha Grade-A")
-    print_audit_trail(res2.get("session_id"))
+    personas = [
+        {
+            "name": "Relaxation Seeker",
+            "goal": "caffeine-free chamomile lavender sleep tea",
+            "cap": 400.0,
+            "mode": "AUTO_APPROVE"
+        },
+        {
+            "name": "Spiced Tea Lover",
+            "goal": "Kashmiri Kahwa and Masala Chai",
+            "cap": 800.0,
+            "mode": "AUTO_APPROVE"
+        },
+        {
+            "name": "Luxury Spice Buyer",
+            "goal": "1g Kashmiri Pure Saffron Strands",
+            "cap": 1000.0,
+            "mode": "AUTO_APPROVE"
+        },
+        {
+            "name": "Strict Budget Shopper",
+            "goal": "Ceremonial Grade Matcha",
+            "cap": 300.0,
+            "mode": "AUTO_APPROVE"
+        },
+        {
+            "name": "Multi-Unit Host",
+            "goal": "3 units of tea-001",
+            "cap": 2000.0,
+            "mode": "AUTO_APPROVE"
+        },
+        {
+            "name": "Classic Connoisseur",
+            "goal": "Darjeeling First Flush and Earl Grey",
+            "cap": 1200.0,
+            "mode": "AUTO_APPROVE"
+        }
+    ]
 
-    # Scenario 3: Stockout Recovery
-    console.print("\n=======================================================")
-    console.print("[bold orange1]SCENARIO 3: Mid-Purchase Stockout Recovery[/bold orange1]")
-    console.print("[yellow]Goal:[/yellow] 'Get a caffeine-free tea under ₹500'")
-    console.print("=======================================================")
-    
-    client = MerchantClient(base_url=SERVER_URL)
-    client.simulate_stockout("tea-002")
-    console.print("[bold yellow]INJECTED FAILURE: Depleted stock of 'Himalayan Chamomile' (tea-002) to 0![/bold yellow]")
+    results: List[Dict[str, Any]] = []
 
-    agent3 = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=500.0, gating_mode="AUTO_APPROVE")
-    res3 = agent3.execute_purchase_goal("Get a caffeine-free tea under ₹500")
-    print_audit_trail(res3.get("session_id", res3.get("audit_session_id")))
+    for idx, p in enumerate(personas, 1):
+        console.print(f"\n[bold yellow][{idx}/{len(personas)}] Running Persona:[/bold yellow] [bold white]{p['name']}[/bold white] (Cap: ₹{p['cap']:.2f})")
+        agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=p['cap'], gating_mode=p['mode'])
+        
+        res = agent.execute_purchase_goal(p['goal'])
+        results.append({
+            "name": p["name"],
+            "goal": p["goal"],
+            "cap": p["cap"],
+            "success": res.get("success", False),
+            "status": res.get("status", "FAILED"),
+            "amount": res.get("amount_inr", 0.0),
+            "reasoning_source": res.get("reasoning_source", "N/A"),
+            "reason": res.get("reason") or res.get("message") or "Success"
+        })
 
-    console.print("\n[bold green]ALL DEMO SCENARIOS EXECUTED SUCCESSFULLY![/bold green]")
+    # Summary Benchmark Report Card Table
+    table = Table(title="📊 Autonomous Multi-Persona Agent Benchmark Summary", border_style="green", header_style="bold magenta")
+    table.add_column("Persona", style="cyan", no_wrap=True)
+    table.add_column("Goal", style="white")
+    table.add_column("Cap (₹)", justify="right", style="yellow")
+    table.add_column("Amount (₹)", justify="right", style="green")
+    table.add_column("Engine", style="magenta")
+    table.add_column("Status", style="bold")
+    table.add_column("Outcome Details", style="dim")
+
+    total_transacted = 0.0
+    total_successful = 0
+    total_blocked = 0
+
+    for r in results:
+        if r["success"]:
+            total_successful += 1
+            total_transacted += r["amount"]
+            status_str = "[green]SUCCESS ✓[/green]"
+        else:
+            total_blocked += 1
+            status_str = f"[red]{r['status']}[/red]"
+
+        table.add_row(
+            r["name"],
+            r["goal"],
+            f"₹{r['cap']:.2f}",
+            f"₹{r['amount']:.2f}" if r["amount"] > 0 else "-",
+            r["reasoning_source"],
+            status_str,
+            str(r["reason"])[:45]
+        )
+
+    console.print("\n")
+    console.print(table)
+
+    summary_panel = Panel.fit(
+        f"[bold green]Total Personas Processed:[/bold green] {len(personas)}\n"
+        f"[bold cyan]Successful Transactions:[/bold cyan] {total_successful}\n"
+        f"[bold red]Blocked by Guardrails:[/bold red] {total_blocked}\n"
+        f"[bold yellow]Total Volume Transacted:[/bold yellow] [bold green]₹{total_transacted:.2f}[/bold green]",
+        title="✨ Benchmark Performance Metrics",
+        border_style="gold1"
+    )
+    console.print(summary_panel)
 
 
 if __name__ == "__main__":
-    main()
+    run_headless_benchmark()
