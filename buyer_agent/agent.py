@@ -61,7 +61,7 @@ class BuyerAgent:
         except Exception as e:
             err_msg = f"Failed to reach Merchant Catalog API: {str(e)}"
             logger.log_step("CATALOG_SEARCH", agent_goal=agent_goal, outcome_status="FAILED", guardrail_message=err_msg)
-            return {"success": False, "status": "API_ERROR", "message": err_msg}
+            return {"success": False, "status": "API_ERROR", "message": err_msg, "session_id": session_id}
 
         cart_input_items = []
         item_details_list = []
@@ -70,7 +70,6 @@ class BuyerAgent:
         for item_sel in choice.items:
             target_p = next((p for p in products if p["id"] == item_sel.product_id), None)
             if not target_p:
-                # Fall back to raw CATALOG_DB lookups if filtered
                 raw_catalog = self.client.get_catalog(in_stock_only=False).get("products", [])
                 target_p = next((p for p in raw_catalog if p["id"] == item_sel.product_id), None)
             
@@ -106,7 +105,7 @@ class BuyerAgent:
         if not cart_input_items:
             err_msg = "No valid products found in pre-approved selection."
             logger.log_step("LLM_REASONING", agent_goal=agent_goal, outcome_status="FAILED", guardrail_message=err_msg)
-            return {"success": False, "status": "INVALID_SELECTION", "message": err_msg}
+            return {"success": False, "status": "INVALID_SELECTION", "message": err_msg, "session_id": session_id}
 
         summary_names = ", ".join([f"{i['quantity']}x {i['product_name']}" for i in item_details_list])
 
@@ -152,7 +151,6 @@ class BuyerAgent:
             outcome_status="APPROVED"
         )
 
-        # Create Cart & Razorpay Checkout Order
         try:
             cart_res = self.client.create_cart(cart_input_items)
             cart_id = cart_res["cart_id"]
@@ -171,7 +169,6 @@ class BuyerAgent:
             )
             return {"success": False, "status": "CHECKOUT_FAILED", "error": err_str, "session_id": session_id}
 
-        # Verify Payment Signature (Test Mode Simulation)
         simulated_payment_id = f"pay_{uuid.uuid4().hex[:10]}"
         key_secret = os.getenv("RAZORPAY_KEY_SECRET", "sr5phj3GIj2gWBIRTmunq8Nh")
         sig = hmac.new(
@@ -252,7 +249,7 @@ class BuyerAgent:
             except Exception as e:
                 err_msg = f"Failed to reach Merchant Catalog API: {str(e)}"
                 logger.log_step("CATALOG_SEARCH", agent_goal=agent_goal, outcome_status="FAILED", guardrail_message=err_msg)
-                return {"success": False, "status": "API_ERROR", "message": err_msg}
+                return {"success": False, "status": "API_ERROR", "message": err_msg, "session_id": session_id}
 
             logger.log_step(
                 "CATALOG_SEARCH",
@@ -272,7 +269,7 @@ class BuyerAgent:
             except Exception as e:
                 err_msg = f"LLM catalog reasoning failed: {str(e)}"
                 logger.log_step("LLM_REASONING", agent_goal=agent_goal, outcome_status="FAILED", guardrail_message=err_msg)
-                return {"success": False, "status": "REASONING_FAILED", "message": err_msg}
+                return {"success": False, "status": "REASONING_FAILED", "message": err_msg, "session_id": session_id}
 
             cart_input_items = []
             item_details_list = []
@@ -280,6 +277,11 @@ class BuyerAgent:
 
             for item_sel in choice.items:
                 target_p = next((p for p in products if p["id"] == item_sel.product_id), None)
+                if not target_p:
+                    # Check raw catalog if filtered out
+                    raw_catalog = self.client.get_catalog(in_stock_only=False).get("products", [])
+                    target_p = next((p for p in raw_catalog if p["id"] == item_sel.product_id), None)
+                
                 if not target_p:
                     continue
                 
@@ -309,10 +311,34 @@ class BuyerAgent:
                     "subtotal_inr": subtotal
                 })
 
-            if not cart_input_items:
-                err_msg = "No valid products selected from catalog."
-                logger.log_step("LLM_REASONING", agent_goal=agent_goal, outcome_status="FAILED", guardrail_message=err_msg)
-                return {"success": False, "status": "INVALID_SELECTION", "message": err_msg}
+            # Check if selection is empty or if selected products exceed budget cap
+            if not cart_input_items or total_amount > self.spending_cap_inr:
+                # Find matching product for error reporting if requested
+                match_p = next((p for p in products if p["id"].lower() in agent_goal.lower() or any(w.lower() in p["name"].lower() for w in agent_goal.split() if len(w) > 3)), None)
+                p_name = match_p["name"] if match_p else agent_goal
+                p_cost = match_p["price_inr"] if match_p else 0.0
+
+                rej_msg = f"Proposed amount ₹{p_cost:.2f} exceeds single action spending cap of ₹{self.spending_cap_inr:.2f}." if p_cost > 0 else f"Requested items exceed spending cap of ₹{self.spending_cap_inr:.2f}."
+
+                logger.log_step(
+                    "GUARDRAIL_EVALUATION",
+                    agent_goal=agent_goal,
+                    proposed_action=f"Requested Product: {p_name}",
+                    llm_reasoning=choice.reasoning,
+                    reasoning_source=choice.reasoning_source,
+                    spending_cap_inr=self.spending_cap_inr,
+                    proposed_amount_inr=p_cost,
+                    guardrail_passed=False,
+                    guardrail_message=rej_msg,
+                    outcome_status="BLOCKED_GUARDRAIL"
+                )
+                console.print(f"[bold red]⛔ GUARDRAIL BLOCKED TRANSACTION:[/bold red] {rej_msg}")
+                return {
+                    "success": False,
+                    "status": "BLOCKED_GUARDRAIL",
+                    "reason": rej_msg,
+                    "session_id": session_id
+                }
 
             summary_names = ", ".join([f"{i['quantity']}x {i['product_name']}" for i in item_details_list])
 
@@ -399,7 +425,6 @@ class BuyerAgent:
                     "session_id": session_id
                 }
 
-            # If approved at gating, execute pre-approved choice directly
             return self.execute_preapproved_choice(choice=choice, agent_goal=agent_goal, session_id=session_id)
 
         return {"success": False, "status": "RETRY_EXHAUSTED", "message": "Could not complete purchase after retries.", "session_id": session_id}
