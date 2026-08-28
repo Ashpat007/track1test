@@ -8,6 +8,7 @@ import time
 import threading
 import uvicorn
 import pytest
+import requests
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -81,42 +82,45 @@ def test_cart_stock_reservation_and_expiration():
     cat_before = client.get_catalog()
     tea1_stock_before = next(p["stock_qty"] for p in cat_before["products"] if p["id"] == "tea-001")
 
-    # Reserve 2 units in cart
+    # 1. Reserve 2 units in cart via real HTTP POST /cart
     cart_res = client.create_cart([{"product_id": "tea-001", "quantity": 2}])
     assert cart_res["is_valid_for_checkout"] is True
     cart_id = cart_res["cart_id"]
 
-    # Verify catalog unreserved stock decreased by 2
+    # 2. Verify catalog unreserved stock decreased by 2 via real HTTP GET /catalog
     cat_during = client.get_catalog()
     tea1_stock_during = next(p["stock_qty"] for p in cat_during["products"] if p["id"] == "tea-001")
     assert tea1_stock_during == tea1_stock_before - 2
 
-    # Expire cart simulation
-    import requests
+    # 3. Expire cart simulation via real HTTP POST /cart/{cart_id}/expire
     exp_res = requests.post(f"{SERVER_URL}/cart/{cart_id}/expire").json()
     assert exp_res["success"] is True
 
-    # Verify reserved stock was released back to catalog
+    # 4. Attempt checkout on expired cart -> Must be rejected over real HTTP POST /checkout/create-order
+    chk_exp = requests.post(f"{SERVER_URL}/checkout/create-order", json={"cart_id": cart_id, "buyer_name": "Test"})
+    assert chk_exp.status_code == 400
+    assert "Cart reservation has expired" in chk_exp.json()["detail"]
+
+    # 5. Verify reserved stock was released back to catalog via real HTTP GET /catalog
     cat_after = client.get_catalog()
     tea1_stock_after = next(p["stock_qty"] for p in cat_after["products"] if p["id"] == "tea-001")
     assert tea1_stock_after == tea1_stock_before
 
 def test_global_emergency_halt_kill_switch():
-    import requests
-    # Halt system
+    # 1. Halt system via real HTTP POST /api/agent-halt
     halt_res = requests.post(f"{SERVER_URL}/api/agent-halt").json()
     assert halt_res["halted"] is True
 
-    # Attempt cart creation -> Should return 503 Emergency Halt
+    # 2. Attempt cart creation via real HTTP POST /cart -> Must return 503 Emergency Halt
     cart_req = requests.post(f"{SERVER_URL}/cart", json={"items": [{"product_id": "tea-001", "quantity": 1}]})
     assert cart_req.status_code == 503
     assert "EMERGENCY_SYSTEM_HALT" in cart_req.json()["detail"]
 
-    # Resume system
+    # 3. Resume system via real HTTP POST /api/agent-resume
     resume_res = requests.post(f"{SERVER_URL}/api/agent-resume").json()
     assert resume_res["halted"] is False
 
-    # Verify normal operations restored
+    # 4. Verify normal operations restored via real HTTP POST /cart
     cart_req2 = requests.post(f"{SERVER_URL}/cart", json={"items": [{"product_id": "tea-001", "quantity": 1}]})
     assert cart_req2.status_code == 200
 
@@ -127,13 +131,18 @@ def test_checkout_idempotency_protection():
 
     idemp_key = f"idemp_test_{time.time()}"
 
-    # First checkout call
-    order1 = client.create_checkout_order(cart_id=cart_id, buyer_name="Agent 1")
-    
-    # Second checkout call with same cart / idempotency key via direct requests
-    import requests
+    # First and second checkout call over real HTTP POST /checkout/create-order with identical idempotency key
     resp1 = requests.post(f"{SERVER_URL}/checkout/create-order", json={"cart_id": cart_id, "buyer_name": "Agent 1", "idempotency_key": idemp_key}).json()
     resp2 = requests.post(f"{SERVER_URL}/checkout/create-order", json={"cart_id": cart_id, "buyer_name": "Agent 1", "idempotency_key": idemp_key}).json()
 
     assert resp1["order_id"] == resp2["order_id"]
     assert resp1["razorpay_order_id"] == resp2["razorpay_order_id"]
+
+def test_agent_spending_cap_breach():
+    agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=100.0, gating_mode="AUTO_APPROVE")
+    goal = "Buy any tea"
+    
+    res = agent.execute_purchase_goal(goal)
+    
+    assert res["success"] is False
+    assert res["status"] in ["BLOCKED_GUARDRAIL", "REASONING_FAILED", "INVALID_SELECTION"]
