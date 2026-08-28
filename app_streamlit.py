@@ -200,49 +200,102 @@ with tab2:
             is_buy_intent = any(k in prompt_lower for k in ["buy", "get", "purchase", "order", "need"])
 
             if is_buy_intent:
-                mode = "CLI" if gating_mode == "Human Review Gate" else "AUTO_APPROVE"
                 agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=spending_cap_input, gating_mode="AUTO_APPROVE")
 
                 with st.chat_message("assistant"):
-                    with st.spinner("Agent evaluating catalog & guardrails..."):
-                        res = agent.execute_purchase_goal(user_prompt)
+                    if gating_mode == "Human Review Gate":
+                        # Interactive Human Review Gating Checkpoint in Streamlit UI
+                        with st.spinner("Agent evaluating catalog & security guardrails..."):
+                            catalog_data = agent.client.get_catalog(in_stock_only=True)
+                            products = catalog_data.get("products", [])
+                            choice = agent.llm_reasoner.select_product_for_goal(user_prompt, products, spending_cap_input)
 
-                    if res.get("success"):
-                        st.balloons()
-                        bot_reply = f"✅ **Purchase Completed!** I've purchased **{res.get('summary_names')}** for **₹{res['amount_inr']:.2f}** under your ₹{spending_cap_input:.2f} cap. Remaining balance: **₹{res['remaining_balance_inr']:.2f}**."
-                        st.write(bot_reply)
+                        total_amount = sum([item.quantity * CATALOG_DB[item.product_id]["price_inr"] for item in choice.items if item.product_id in CATALOG_DB])
+                        summary_names = ", ".join([f"{i.quantity}x {CATALOG_DB[i.product_id]['name']}" for i in choice.items if i.product_id in CATALOG_DB])
 
-                        rzp_data = {
-                            "amount": res['amount_inr'],
-                            "order_id": res.get('razorpay_order_id'),
-                            "payment_id": res.get('razorpay_payment_id'),
-                            "items": res.get('summary_names')
-                        }
+                        eval_res = agent.guardrail_engine.evaluate_proposal(
+                            product_id=choice.items[0].product_id,
+                            product_name=summary_names,
+                            total_amount_inr=total_amount,
+                            quantity=sum([i.quantity for i in choice.items]),
+                            currency="INR",
+                            current_session_spent_inr=agent.session_spent_inr
+                        )
 
-                        st.markdown(f"""
-                        <div class="razorpay-success-card">
-                            <div class="razorpay-badge">RAZORPAY TEST PAYMENT CAPTURED</div>
-                            <div class="razorpay-checkmark-circle">
-                                <span class="razorpay-checkmark">✓</span>
-                            </div>
-                            <h3 style="color: #00baf2; margin-bottom: 4px;">Order Confirmed!</h3>
-                            <p style="font-size: 20px; font-weight: bold; color: #10b981; margin-bottom: 12px;">₹{rzp_data['amount']:.2f} Paid</p>
-                            <p style="font-size: 13px; color: #94a3b8; margin: 2px 0;"><strong>Razorpay Order ID:</strong> {rzp_data['order_id']}</p>
-                            <p style="font-size: 13px; color: #94a3b8; margin: 2px 0;"><strong>Razorpay Payment ID:</strong> {rzp_data['payment_id']}</p>
-                            <p style="font-size: 13px; color: #94a3b8; margin: 2px 0;"><strong>Items Purchased:</strong> {rzp_data['items']}</p>
-                            <p style="font-size: 12px; color: #64748b; margin-top: 10px;">Merchant: Aura Artisan Teas & Botanicals</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        if not eval_res.passed:
+                            reply = f"⛔ **GUARDRAIL BLOCKED TRANSACTION:** {eval_res.rejection_reason}"
+                            st.error(reply)
+                            st.session_state.messages.append({"role": "assistant", "content": reply})
+                        else:
+                            st.warning("🛑 **HUMAN REVIEW GATING CHECKPOINT — CLEARANCE REQUIRED**")
+                            st.info(f"**Selected Items:** {summary_names}\n\n**Total Amount:** ₹{total_amount:.2f} (Cap: ₹{spending_cap_input:.2f})\n\n**LLM Reasoning:** {choice.reasoning}")
+                            
+                            if choice.stock_warnings:
+                                for w in choice.stock_warnings:
+                                    st.warning(w)
 
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": bot_reply,
-                            "razorpay_data": rzp_data
-                        })
+                            col_approve, col_reject = st.columns(2)
+                            if col_approve.button("✅ Approve & Execute Payment", key="btn_approve"):
+                                res = agent.execute_preapproved_choice(choice=choice, agent_goal=user_prompt)
+                                if res.get("success"):
+                                    st.balloons()
+                                    bot_reply = f"✅ **Purchase Completed!** Purchased **{res.get('summary_names')}** for **₹{res['amount_inr']:.2f}** under your ₹{spending_cap_input:.2f} cap."
+                                    st.success(bot_reply)
+                                    rzp_data = {
+                                        "amount": res['amount_inr'],
+                                        "order_id": res.get('razorpay_order_id'),
+                                        "payment_id": res.get('razorpay_payment_id'),
+                                        "items": res.get('summary_names')
+                                    }
+                                    st.session_state.messages.append({
+                                        "role": "assistant",
+                                        "content": bot_reply,
+                                        "razorpay_data": rzp_data
+                                    })
+                            if col_reject.button("❌ Deny / Reject Payment", key="btn_reject"):
+                                reply = "⛔ **Action Denied:** User rejected gating clearance."
+                                st.error(reply)
+                                st.session_state.messages.append({"role": "assistant", "content": reply})
                     else:
-                        reply = f"⛔ **Action Blocked / Failed:** {res.get('reason') or res.get('message')}"
-                        st.write(reply)
-                        st.session_state.messages.append({"role": "assistant", "content": reply})
+                        with st.spinner("Agent executing purchase goal..."):
+                            res = agent.execute_purchase_goal(user_prompt)
+
+                        if res.get("success"):
+                            st.balloons()
+                            bot_reply = f"✅ **Purchase Completed!** Purchased **{res.get('summary_names')}** for **₹{res['amount_inr']:.2f}** under your ₹{spending_cap_input:.2f} cap. Remaining balance: **₹{res['remaining_balance_inr']:.2f}**."
+                            st.write(bot_reply)
+
+                            rzp_data = {
+                                "amount": res['amount_inr'],
+                                "order_id": res.get('razorpay_order_id'),
+                                "payment_id": res.get('razorpay_payment_id'),
+                                "items": res.get('summary_names')
+                            }
+
+                            st.markdown(f"""
+                            <div class="razorpay-success-card">
+                                <div class="razorpay-badge">RAZORPAY TEST PAYMENT CAPTURED</div>
+                                <div class="razorpay-checkmark-circle">
+                                    <span class="razorpay-checkmark">✓</span>
+                                </div>
+                                <h3 style="color: #00baf2; margin-bottom: 4px;">Order Confirmed!</h3>
+                                <p style="font-size: 20px; font-weight: bold; color: #10b981; margin-bottom: 12px;">₹{rzp_data['amount']:.2f} Paid</p>
+                                <p style="font-size: 13px; color: #94a3b8; margin: 2px 0;"><strong>Razorpay Order ID:</strong> {rzp_data['order_id']}</p>
+                                <p style="font-size: 13px; color: #94a3b8; margin: 2px 0;"><strong>Razorpay Payment ID:</strong> {rzp_data['payment_id']}</p>
+                                <p style="font-size: 13px; color: #94a3b8; margin: 2px 0;"><strong>Items Purchased:</strong> {rzp_data['items']}</p>
+                                <p style="font-size: 12px; color: #64748b; margin-top: 10px;">Merchant: Aura Artisan Teas & Botanicals</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": bot_reply,
+                                "razorpay_data": rzp_data
+                            })
+                        else:
+                            reply = f"⛔ **Action Blocked / Failed:** {res.get('reason') or res.get('message')}"
+                            st.write(reply)
+                            st.session_state.messages.append({"role": "assistant", "content": reply})
 
             else:
                 matched_products = []

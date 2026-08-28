@@ -317,8 +317,11 @@ def confirm_gating_api(payload: ConfirmGatingInput):
     if not payload.approved:
         return {"success": False, "status": "REJECTED_BY_USER", "message": "User denied gating clearance."}
 
+    from buyer_agent.llm_reasoner import AgentChoice
+    choice = AgentChoice(**proposal["choice"])
+
     agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=proposal["spending_cap_inr"], gating_mode="AUTO_APPROVE")
-    res = agent.execute_purchase_goal(proposal["goal"], session_id=proposal["session_id"])
+    res = agent.execute_preapproved_choice(choice=choice, agent_goal=proposal["goal"], session_id=proposal["session_id"])
     return res
 
 

@@ -41,7 +41,7 @@ def test_guardrail_engine_direct_spending_cap_breach():
     assert res.passed is False
     assert "exceeds single action spending cap" in res.rejection_reason
 
-def test_cumulative_session_spend_breach():
+def test_cumulative_session_spend_engine():
     engine = GuardrailEngine(max_single_action_inr=500.0, max_session_spend_inr=600.0)
     # First purchase under budget (₹400)
     res1 = engine.evaluate_proposal(
@@ -62,7 +62,26 @@ def test_cumulative_session_spend_breach():
         current_session_spent_inr=400.0
     )
     assert res2.passed is False
-    assert "exceeds maximum session budget cap" in res2.rejection_reason
+    assert "exceeds session cap of ₹" in res2.rejection_reason
+
+def test_agent_cumulative_session_spend_integration():
+    """
+    Integration Test: Asserts that BuyerAgent instance accumulates spend across consecutive purchase calls
+    and blocks the second purchase when cumulative spend breaches session cap.
+    """
+    agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=500.0, gating_mode="AUTO_APPROVE")
+    agent.guardrail_engine.max_session_spend_inr = 600.0
+
+    # 1st purchase: 1x Kahwa (₹420.0) -> Passes
+    res1 = agent.execute_purchase_goal("Buy 1 Kahwa")
+    assert res1["success"] is True
+    assert agent.session_spent_inr == 420.0
+
+    # 2nd purchase in same session instance: 1x Chamomile (₹380.0) -> Projected total = ₹800.0 (exceeds ₹600 cap)
+    res2 = agent.execute_purchase_goal("Buy 1 Chamomile")
+    assert res2["success"] is False
+    assert res2["status"] == "BLOCKED_GUARDRAIL"
+    assert "exceeds session cap of ₹" in res2["reason"]
 
 def test_agent_spending_cap_breach():
     agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=100.0, gating_mode="AUTO_APPROVE")
