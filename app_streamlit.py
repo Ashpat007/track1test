@@ -1,6 +1,6 @@
 """
 Streamlit Visual Web Dashboard for Razorpay Buildathon Track 01 Submission.
-Features: Interactive Merchant Catalog, Agent Spec Discovery, Conversational Shopping Chatbot with Catalog RAG,
+Features: Interactive Agent-Readable Catalog, Agent Spec Discovery, Conversational Shopping Chatbot with Catalog RAG,
 Live Human Gating Checkpoint, Razorpay Payment Success Animation, Real-Time Stock Updates, and SQL Audit Log Inspector.
 """
 
@@ -100,17 +100,16 @@ st.title("🍵 Aura Artisan Teas & Botanicals")
 st.subheader("Agent-Readable Commerce API & Machine-to-Machine Bounded Payments")
 st.caption("Razorpay AI Buildathon — Track 01: AI Growth & Agentic Commerce")
 
-tab1, tab2, tab3 = st.tabs(["🏪 Merchant Catalog", "💬 Conversational Buyer Chatbot", "📋 Durable SQL Audit Trail"])
+tab1, tab2, tab3 = st.tabs(["🏪 Agent-Readable Catalog", "💬 Conversational Buyer Chatbot", "📋 Durable SQL Audit Trail"])
 
 # --- TAB 1: Merchant Catalog & Agent Spec ---
 with tab1:
     st.markdown("### Agent-Readable Product Catalog (`GET /catalog`)")
+    st.caption("Structured JSON dataset consumed directly by autonomous AI buyer agents for reasoning.")
     cols = st.columns(4)
     
     for idx, (p_id, p) in enumerate(CATALOG_DB.items()):
         with cols[idx % 4]:
-            if p.get('image_url'):
-                st.image(p['image_url'], use_container_width=True)
             st.info(f"**{p['name']}** (`{p['id']}`)")
             st.write(f"**Category:** {p['category']}")
             st.write(f"**Base Price:** ₹{p['price_inr']:.2f}")
@@ -204,7 +203,6 @@ with tab2:
 
                 with st.chat_message("assistant"):
                     if gating_mode == "Human Review Gate":
-                        # Interactive Human Review Gating Checkpoint in Streamlit UI
                         with st.spinner("Agent evaluating catalog & security guardrails..."):
                             catalog_data = agent.client.get_catalog(in_stock_only=True)
                             products = catalog_data.get("products", [])
@@ -214,16 +212,16 @@ with tab2:
                         summary_names = ", ".join([f"{i.quantity}x {CATALOG_DB[i.product_id]['name']}" for i in choice.items if i.product_id in CATALOG_DB])
 
                         eval_res = agent.guardrail_engine.evaluate_proposal(
-                            product_id=choice.items[0].product_id,
-                            product_name=summary_names,
+                            product_id=choice.items[0].product_id if choice.items else "none",
+                            product_name=summary_names if summary_names else user_prompt,
                             total_amount_inr=total_amount,
                             quantity=sum([i.quantity for i in choice.items]),
                             currency="INR",
                             current_session_spent_inr=agent.session_spent_inr
                         )
 
-                        if not eval_res.passed:
-                            reply = f"⛔ **GUARDRAIL BLOCKED TRANSACTION:** {eval_res.rejection_reason}"
+                        if not eval_res.passed or not choice.items:
+                            reply = f"⛔ **GUARDRAIL BLOCKED TRANSACTION:** {eval_res.rejection_reason if not eval_res.passed else choice.reasoning}"
                             st.error(reply)
                             st.session_state.messages.append({"role": "assistant", "content": reply})
                         else:
