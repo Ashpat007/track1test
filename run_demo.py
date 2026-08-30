@@ -1,7 +1,7 @@
 """
 Interactive CLI Demo Runner for Razorpay Buildathon Track 01 Submission.
 Displays Merchant Catalog Details, Agent Spec Discovery, Gemini LLM Reasoning,
-Deterministic Guardrail Checks, Human Gating Panel, Razorpay Test Order Creation, and Audit Trail.
+Deterministic Guardrail Checks, Human Gating Panel, Autonomous Upsell Recommendations, Razorpay Test Order Creation, and Audit Trail.
 """
 
 import sys
@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from merchant_api.app import app as merchant_app, CATALOG_DB
 from buyer_agent.agent import BuyerAgent
 from buyer_agent.client import MerchantClient
+from buyer_agent.llm_reasoner import AgentChoice, AgentItemSelection
 from guardrails.audit import AuditLogger
 
 console = Console(force_terminal=True)
@@ -100,6 +101,8 @@ def display_agent_discovered_spec():
 
 def display_audit_logs_summary(session_id: str):
     """Displays a clean, ultra-readable step-by-step timeline of SQL Audit logs."""
+    if not session_id:
+        return
     logger = AuditLogger(session_id=session_id)
     history = logger.get_session_history()
 
@@ -159,9 +162,10 @@ def run_interactive_demo():
     console.print("1. [bold green]Successful Purchase Flow[/bold green] (Pre-set Goal: Herbal tea under ₹500)")
     console.print("2. [bold red]Guardrail Block Test[/bold red] (Pre-set Goal: Matcha ₹950 exceeding ₹500 cap)")
     console.print("3. [bold orange1]Mid-Purchase Stockout Recovery[/bold orange1] (Simulates sudden stock depletion)")
-    console.print("4. [bold cyan]Custom Shopping Goal & Spending Cap[/bold cyan] (Type your prompt & spending limit)")
+    console.print("4. [bold magenta]Autonomous Revenue Growth & Upsell Demo[/bold magenta] (In-budget recommendation & cap upgrade)")
+    console.print("5. [bold cyan]Custom Shopping Goal & Spending Cap[/bold cyan] (Type your prompt & spending limit)")
 
-    choice = Prompt.ask("\nEnter choice [1/2/3/4]", choices=["1", "2", "3", "4"], default="1")
+    choice = Prompt.ask("\nEnter choice [1/2/3/4/5]", choices=["1", "2", "3", "4", "5"], default="1")
 
     if choice == "1":
         spending_cap = 500.0
@@ -193,6 +197,51 @@ def run_interactive_demo():
         display_audit_logs_summary(res.get("session_id", res.get("audit_session_id")))
 
     elif choice == "4":
+        spending_cap = 500.0
+        goal = "Buy Ceremonial Matcha Grade-A"
+        agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=spending_cap, gating_mode="CLI")
+        console.print(f"\n[bold magenta]Running Scenario 4 (Revenue Upsell & Cross-Sell Engine):[/bold magenta]")
+        console.print(f"Goal = '{goal}' | Initial Cap = ₹{spending_cap:.2f} (Matcha is ₹950.00)")
+        
+        res = agent.execute_purchase_goal(goal)
+        up = res.get("upsell_proposal")
+
+        if up:
+            console.print(Panel.fit(
+                f"[bold yellow]🛍️ AUTONOMOUS REVENUE GROWTH & UPSELL PROPOSAL[/bold yellow]\n\n"
+                f"[white]{up['recommendation_reasoning']}[/white]\n\n"
+                f"[bold green]Option 1:[/bold green] Accept In-Budget Alternative '[bold cyan]{up['alternative_product_name']}[/bold cyan]' (₹{up['alternative_product_price_inr']:.2f})\n"
+                f"[bold magenta]Option 2:[/bold magenta] Upgrade Spending Cap to [bold yellow]₹{up['suggested_cap_increase_inr']:.2f}[/bold yellow] & Purchase '[bold cyan]{up['breached_product_name']}[/bold cyan]'\n"
+                f"[bold red]Option 3:[/bold red] Decline Recommendation",
+                title="Revenue Growth Opportunities",
+                border_style="magenta"
+            ))
+
+            opt = Prompt.ask("\nSelect Recommendation Option [1/2/3]", choices=["1", "2", "3"], default="1")
+            
+            if opt == "1":
+                alt_choice = AgentChoice(
+                    items=[AgentItemSelection(**i) for i in up["alternative_items"]],
+                    reasoning=f"User accepted in-budget alternative '{up['alternative_product_name']}'",
+                    reasoning_source="GEMINI_3.6_FLASH"
+                )
+                res_alt = agent.execute_preapproved_choice(choice=alt_choice, agent_goal=goal)
+                console.print(f"\n[bold green]✓ Purchase Completed:[/bold green] Purchased {res_alt.get('summary_names')} for ₹{res_alt.get('amount_inr'):.2f}")
+                display_audit_logs_summary(res_alt.get("session_id"))
+            elif opt == "2":
+                upgraded_agent = BuyerAgent(merchant_base_url=SERVER_URL, spending_cap_inr=up["suggested_cap_increase_inr"], gating_mode="CLI")
+                up_choice = AgentChoice(
+                    items=[AgentItemSelection(product_id=up["breached_product_id"], quantity=1)],
+                    reasoning=f"User upgraded spending cap to ₹{up['suggested_cap_increase_inr']:.2f} to unlock '{up['breached_product_name']}'",
+                    reasoning_source="GEMINI_3.6_FLASH"
+                )
+                res_up = upgraded_agent.execute_preapproved_choice(choice=up_choice, agent_goal=goal)
+                console.print(f"\n[bold magenta]🚀 Revenue Upsell Successful:[/bold magenta] Upgraded cap to ₹{up['suggested_cap_increase_inr']:.2f} and purchased {res_up.get('summary_names')} for ₹{res_up.get('amount_inr'):.2f}")
+                display_audit_logs_summary(res_up.get("session_id"))
+            else:
+                console.print("[bold red]Decline registered.[/bold red] Transaction aborted.")
+
+    elif choice == "5":
         console.print("\n[bold cyan]--- CUSTOM SHOPPING GOAL ---[/bold cyan]")
         goal = Prompt.ask("Step 1/2: Enter your Shopping Goal")
         

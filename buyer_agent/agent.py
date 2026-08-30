@@ -2,7 +2,7 @@
 Autonomous Buyer Agent Core Orchestrator.
 Orchestrates: Catalog Fetch -> LLM Reasoning -> Guardrail Evaluation -> Gating Clearance -> Cart & Checkout API execution -> Audit Logging.
 Supports multi-product cart selections (e.g. 2x Kahwa + 1x Matcha).
-Includes direct execution of pre-approved selections to guarantee Gating Determinism (Approve-X-Execute-X).
+Includes direct execution of pre-approved selections to guarantee Gating Determinism (Approve-X-Execute-X) & Upsell Recommendation Engine.
 """
 
 import os
@@ -14,7 +14,7 @@ from rich.console import Console
 from dotenv import load_dotenv
 
 from buyer_agent.client import MerchantClient
-from buyer_agent.llm_reasoner import LLMReasoner, AgentChoice
+from buyer_agent.llm_reasoner import LLMReasoner, AgentChoice, AgentRecommendationProposal
 from guardrails.engine import GuardrailEngine
 from guardrails.gating import GatingCheckpoint
 from guardrails.audit import AuditLogger
@@ -136,7 +136,8 @@ class BuyerAgent:
                 "success": False,
                 "status": "BLOCKED_GUARDRAIL",
                 "reason": eval_res.rejection_reason,
-                "session_id": session_id
+                "session_id": session_id,
+                "upsell_proposal": choice.upsell_proposal.model_dump() if choice.upsell_proposal else None
             }
 
         logger.log_step(
@@ -278,7 +279,6 @@ class BuyerAgent:
             for item_sel in choice.items:
                 target_p = next((p for p in products if p["id"] == item_sel.product_id), None)
                 if not target_p:
-                    # Check raw catalog if filtered out
                     raw_catalog = self.client.get_catalog(in_stock_only=False).get("products", [])
                     target_p = next((p for p in raw_catalog if p["id"] == item_sel.product_id), None)
                 
@@ -313,12 +313,14 @@ class BuyerAgent:
 
             # Check if selection is empty or if selected products exceed budget cap
             if not cart_input_items or total_amount > self.spending_cap_inr:
-                # Find matching product for error reporting if requested
                 match_p = next((p for p in products if p["id"].lower() in agent_goal.lower() or any(w.lower() in p["name"].lower() for w in agent_goal.split() if len(w) > 3)), None)
                 p_name = match_p["name"] if match_p else agent_goal
                 p_cost = match_p["price_inr"] if match_p else 0.0
 
                 rej_msg = f"Proposed amount ₹{p_cost:.2f} exceeds single action spending cap of ₹{self.spending_cap_inr:.2f}." if p_cost > 0 else f"Requested items exceed spending cap of ₹{self.spending_cap_inr:.2f}."
+
+                # If upsell proposal exists, attach to audit step & return
+                upsell_dict = choice.upsell_proposal.model_dump() if choice.upsell_proposal else None
 
                 logger.log_step(
                     "GUARDRAIL_EVALUATION",
@@ -330,14 +332,16 @@ class BuyerAgent:
                     proposed_amount_inr=p_cost,
                     guardrail_passed=False,
                     guardrail_message=rej_msg,
-                    outcome_status="BLOCKED_GUARDRAIL"
+                    outcome_status="BLOCKED_GUARDRAIL",
+                    details={"upsell_proposal": upsell_dict}
                 )
                 console.print(f"[bold red]⛔ GUARDRAIL BLOCKED TRANSACTION:[/bold red] {rej_msg}")
                 return {
                     "success": False,
                     "status": "BLOCKED_GUARDRAIL",
                     "reason": rej_msg,
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "upsell_proposal": upsell_dict
                 }
 
             summary_names = ", ".join([f"{i['quantity']}x {i['product_name']}" for i in item_details_list])
@@ -364,6 +368,7 @@ class BuyerAgent:
             )
 
             if not eval_res.passed:
+                upsell_dict = choice.upsell_proposal.model_dump() if choice.upsell_proposal else None
                 logger.log_step(
                     "GUARDRAIL_EVALUATION",
                     agent_goal=agent_goal,
@@ -374,14 +379,16 @@ class BuyerAgent:
                     proposed_amount_inr=total_amount,
                     guardrail_passed=False,
                     guardrail_message=eval_res.rejection_reason,
-                    outcome_status="BLOCKED_GUARDRAIL"
+                    outcome_status="BLOCKED_GUARDRAIL",
+                    details={"upsell_proposal": upsell_dict}
                 )
                 console.print(f"[bold red]⛔ GUARDRAIL BLOCKED TRANSACTION:[/bold red] {eval_res.rejection_reason}")
                 return {
                     "success": False,
                     "status": "BLOCKED_GUARDRAIL",
                     "reason": eval_res.rejection_reason,
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "upsell_proposal": upsell_dict
                 }
 
             logger.log_step(

@@ -1,6 +1,6 @@
 """
-Gemini LLM Catalog Reasoner (Migrated to modern `google.genai` SDK with Multi-Model Quota Fallback).
-Evaluates natural language goals against raw catalog JSON and outputs structured multi-product cart selections.
+Gemini LLM Catalog Reasoner (Migrated to modern `google.genai` SDK with Multi-Model Quota Fallback & Autonomous Revenue Upsell Engine).
+Evaluates natural language goals against raw catalog JSON and outputs structured multi-product cart selections or upside recommendation proposals.
 CONFINED STRICTLY TO INTENT PARSING & SELECTION — CANNOT EXECUTE PAYMENTS WITHOUT GATING CLEARANCE.
 """
 
@@ -26,11 +26,24 @@ class AgentItemSelection(BaseModel):
     stock_warning: Optional[str] = None
 
 
+class AgentRecommendationProposal(BaseModel):
+    budget_breached: bool = False
+    breached_product_id: Optional[str] = None
+    breached_product_name: Optional[str] = None
+    breached_product_price_inr: Optional[float] = None
+    alternative_items: List[AgentItemSelection] = Field(default_factory=list)
+    alternative_product_name: Optional[str] = None
+    alternative_product_price_inr: Optional[float] = None
+    suggested_cap_increase_inr: Optional[float] = None
+    recommendation_reasoning: Optional[str] = None
+
+
 class AgentChoice(BaseModel):
     items: List[AgentItemSelection]
     reasoning: str
     reasoning_source: str = "GEMINI_3.6_FLASH"
     stock_warnings: List[str] = Field(default_factory=list)
+    upsell_proposal: Optional[AgentRecommendationProposal] = None
 
 
 class LLMReasoner:
@@ -44,6 +57,51 @@ class LLMReasoner:
             except Exception as e:
                 print(f"[LLMReasoner Init Notice] genai.Client init: {e}")
 
+    def generate_upsell_recommendation(
+        self,
+        agent_goal: str,
+        catalog_products: List[Dict[str, Any]],
+        spending_cap_inr: float,
+        breached_p: Dict[str, Any]
+    ) -> AgentRecommendationProposal:
+        """
+        Generates an autonomous Revenue Growth & Upsell Recommendation Proposal when requested product exceeds spending cap.
+        Provides both an in-budget alternative (cross-sell) and a spending cap upgrade suggestion (upsell).
+        """
+        in_budget_products = [p for p in catalog_products if p["price_inr"] <= spending_cap_inr and p["stock_qty"] > 0]
+        alt_product = in_budget_products[0] if in_budget_products else None
+        
+        alt_items = []
+        alt_name = None
+        alt_price = 0.0
+
+        if alt_product:
+            var_id = alt_product["variants"][0]["id"] if alt_product.get("variants") else None
+            alt_price = alt_product["price_inr"] + (alt_product["variants"][0]["price_modifier_inr"] if var_id else 0.0)
+            alt_name = alt_product["name"]
+            alt_items.append(AgentItemSelection(product_id=alt_product["id"], variant_id=var_id, quantity=1, requested_quantity=1))
+
+        # Suggested spending cap increase to unlock requested product
+        suggested_cap = float(int(breached_p["price_inr"] / 100.0) + 1) * 100.0
+
+        rec_reasoning = (
+            f"Requested item '{breached_p['name']}' (₹{breached_p['price_inr']:.2f}) exceeds your single action spending cap of ₹{spending_cap_inr:.2f}. "
+            f"Recommendation Option A: Purchase in-budget alternative '{alt_name}' (₹{alt_price:.2f}). "
+            f"Recommendation Option B: Upgrade your spending cap to ₹{suggested_cap:.2f} to unlock '{breached_p['name']}'."
+        )
+
+        return AgentRecommendationProposal(
+            budget_breached=True,
+            breached_product_id=breached_p["id"],
+            breached_product_name=breached_p["name"],
+            breached_product_price_inr=breached_p["price_inr"],
+            alternative_items=alt_items,
+            alternative_product_name=alt_name,
+            alternative_product_price_inr=alt_price,
+            suggested_cap_increase_inr=suggested_cap,
+            recommendation_reasoning=rec_reasoning
+        )
+
     def select_product_for_goal(
         self,
         agent_goal: str,
@@ -51,10 +109,6 @@ class LLMReasoner:
         spending_cap_inr: float,
         exclude_product_ids: Optional[List[str]] = None
     ) -> AgentChoice:
-        """
-        Queries Gemini LLM via google.genai SDK with instant multi-model fallback.
-        Explicitly tracks reasoning_source ("GEMINI_3.6_FLASH", "GEMINI_2.5_FLASH", or "RULE_FALLBACK").
-        """
         exclude_ids = exclude_product_ids or []
         available_catalog = [p for p in catalog_products if p["id"] not in exclude_ids and p["stock_qty"] > 0]
 
@@ -119,11 +173,18 @@ INSTRUCTIONS:
 
                     engine_tag = "GEMINI_3.6_FLASH" if "3.6" in target_model else ("GEMINI_2.5_FLASH" if "2.5" in target_model else "GEMINI_1.5_FLASH")
                     
+                    # Check if requested product exceeded cap
+                    matched_p = next((p for p in available_catalog if p["id"].lower() in agent_goal.lower() or any(w.lower() in p["name"].lower() for w in agent_goal.split() if len(w) > 3)), None)
+                    upsell_prop = None
+                    if matched_p and matched_p["price_inr"] > spending_cap_inr:
+                        upsell_prop = self.generate_upsell_recommendation(agent_goal, catalog_products, spending_cap_inr, matched_p)
+
                     return AgentChoice(
                         items=items,
                         reasoning=reasoning_text,
                         reasoning_source=engine_tag,
-                        stock_warnings=warnings
+                        stock_warnings=warnings,
+                        upsell_proposal=upsell_prop
                     )
                 except Exception as e:
                     err_str = str(e)
@@ -134,8 +195,6 @@ INSTRUCTIONS:
                         print(f"[LLMReasoner Notice] {target_model} exception: {e}.")
                         break
 
-            # Fallback parser if API rate limits persist
-            print("[LLMReasoner Notice] Utilizing Token-Proximity NLP Fallback.")
             return self._token_proximity_nlp_parser(agent_goal, available_catalog, spending_cap_inr, exclude_ids, catalog_products)
         else:
             return self._token_proximity_nlp_parser(agent_goal, available_catalog, spending_cap_inr, exclude_ids, catalog_products)
@@ -227,12 +286,14 @@ INSTRUCTIONS:
 
         if not selected_items and matched_products:
             m_p = matched_products[0]
+            upsell_prop = self.generate_upsell_recommendation(agent_goal, all_catalog, spending_cap_inr, m_p)
             reasoning_str = f"Rule-based Intent Parser: Requested item '{m_p['name']}' (₹{m_p['price_inr']:.2f}) exceeds spending cap of ₹{spending_cap_inr:.2f}."
             return AgentChoice(
                 items=[],
                 reasoning=reasoning_str,
                 reasoning_source="RULE_FALLBACK",
-                stock_warnings=stock_warnings
+                stock_warnings=stock_warnings,
+                upsell_proposal=upsell_prop
             )
 
         if not selected_items and not matched_products:
