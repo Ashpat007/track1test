@@ -286,7 +286,7 @@ class BuyerAgent:
             return {"success": False, "status": "CHECKOUT_FAILED", "error": err_str, "session_id": session_id}
 
         simulated_payment_id = f"pay_{uuid.uuid4().hex[:10]}"
-        key_secret = os.getenv("RAZORPAY_KEY_SECRET", "sr5phj3GIj2gWBIRTmunq8Nh")
+        key_secret = os.getenv("RAZORPAY_KEY_SECRET", "dummy_secret_for_test_signature")
         sig = hmac.new(
             bytes(key_secret, 'utf-8'),
             bytes(f"{rzp_order_id}|{simulated_payment_id}", 'utf-8'),

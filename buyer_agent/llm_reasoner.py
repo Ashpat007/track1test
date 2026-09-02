@@ -47,6 +47,8 @@ class AgentChoice(BaseModel):
 
 
 class LLMReasoner:
+    _exhausted_models = set()
+
     def __init__(self, model_name: str = "gemini-3.6-flash"):
         self.model_name = model_name
         self.fallback_models = ["gemini-3.5-flash", "gemini-flash-latest"]
@@ -130,7 +132,11 @@ class LLMReasoner:
             stockout_context = f"\nIMPORTANT STOCKOUT NOTICE: The following item(s) are OUT OF STOCK and excluded from catalog: {', '.join(excluded_names)}. You MUST explicitly state in your reasoning that the primary item was out of stock and explain why this alternative item was chosen to fulfill the goal.\n"
 
         if self.client:
-            models_to_try = [self.model_name] + [m for m in self.fallback_models if m != self.model_name]
+            raw_models = [self.model_name] + [m for m in self.fallback_models if m != self.model_name]
+            models_to_try = [m for m in raw_models if m not in LLMReasoner._exhausted_models]
+            if not models_to_try:
+                models_to_try = raw_models
+
             prompt = f"""
 You are an expert autonomous buyer assistant reasoning over a merchant's product catalog.
 
@@ -207,6 +213,7 @@ INSTRUCTIONS:
                 except Exception as e:
                     err_str = str(e)
                     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        LLMReasoner._exhausted_models.add(target_model)
                         print(f"[LLMReasoner Notice] {target_model} rate limited (429). Instantly switching model...")
                         continue
                     else:
