@@ -24,3 +24,8 @@ env/
 .vscode/
 *.swp
 .DS_Store
+
+# Next.js Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/

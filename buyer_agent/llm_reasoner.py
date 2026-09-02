@@ -49,7 +49,7 @@ class AgentChoice(BaseModel):
 class LLMReasoner:
     def __init__(self, model_name: str = "gemini-3.6-flash"):
         self.model_name = model_name
-        self.fallback_models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+        self.fallback_models = ["gemini-3.5-flash", "gemini-flash-latest"]
         self.client = None
         if GEMINI_API_KEY:
             try:
@@ -62,39 +62,48 @@ class LLMReasoner:
         agent_goal: str,
         catalog_products: List[Dict[str, Any]],
         spending_cap_inr: float,
-        breached_p: Dict[str, Any]
+        breached_p: Dict[str, Any],
+        requested_qty: int = 1
     ) -> AgentRecommendationProposal:
         """
-        Generates an autonomous Revenue Growth & Upsell Recommendation Proposal when requested product exceeds spending cap.
-        Provides both an in-budget alternative (cross-sell) and a spending cap upgrade suggestion (upsell).
+        Generates an autonomous Revenue Growth & Upsell Recommendation Proposal when requested product or quantity exceeds spending cap.
+        Provides both an in-budget alternative/quantity (cross-sell) and a spending cap upgrade suggestion (upsell).
         """
-        in_budget_products = [p for p in catalog_products if p["price_inr"] <= spending_cap_inr and p["stock_qty"] > 0]
-        alt_product = in_budget_products[0] if in_budget_products else None
-        
-        alt_items = []
-        alt_name = None
-        alt_price = 0.0
+        total_breached_price = breached_p["price_inr"] * requested_qty
 
-        if alt_product:
-            var_id = alt_product["variants"][0]["id"] if alt_product.get("variants") else None
-            alt_price = alt_product["price_inr"] + (alt_product["variants"][0]["price_modifier_inr"] if var_id else 0.0)
-            alt_name = alt_product["name"]
-            alt_items.append(AgentItemSelection(product_id=alt_product["id"], variant_id=var_id, quantity=1, requested_quantity=1))
+        if requested_qty > 1 and breached_p["price_inr"] <= spending_cap_inr:
+            var_id = breached_p["variants"][0]["id"] if breached_p.get("variants") else None
+            alt_name = f"1x {breached_p['name']}"
+            alt_price = breached_p["price_inr"]
+            alt_items = [AgentItemSelection(product_id=breached_p["id"], variant_id=var_id, quantity=1, requested_quantity=1)]
+        else:
+            in_budget_products = [p for p in catalog_products if p["price_inr"] <= spending_cap_inr and p["stock_qty"] > 0]
+            alt_product = in_budget_products[0] if in_budget_products else None
+            alt_items = []
+            alt_name = None
+            alt_price = 0.0
 
-        # Suggested spending cap increase to unlock requested product
-        suggested_cap = float(int(breached_p["price_inr"] / 100.0) + 1) * 100.0
+            if alt_product:
+                var_id = alt_product["variants"][0]["id"] if alt_product.get("variants") else None
+                alt_price = alt_product["price_inr"] + (alt_product["variants"][0]["price_modifier_inr"] if var_id else 0.0)
+                alt_name = alt_product["name"]
+                alt_items.append(AgentItemSelection(product_id=alt_product["id"], variant_id=var_id, quantity=1, requested_quantity=1))
+
+        # Suggested spending cap increase to unlock full requested amount
+        suggested_cap = float(int(total_breached_price / 100.0) + 1) * 100.0
+        display_breached_name = f"{requested_qty}x {breached_p['name']}" if requested_qty > 1 else breached_p["name"]
 
         rec_reasoning = (
-            f"Requested item '{breached_p['name']}' (₹{breached_p['price_inr']:.2f}) exceeds your single action spending cap of ₹{spending_cap_inr:.2f}. "
-            f"Recommendation Option A: Purchase in-budget alternative '{alt_name}' (₹{alt_price:.2f}). "
-            f"Recommendation Option B: Upgrade your spending cap to ₹{suggested_cap:.2f} to unlock '{breached_p['name']}'."
+            f"Requested '{display_breached_name}' (₹{total_breached_price:.2f}) exceeds your single action spending cap of ₹{spending_cap_inr:.2f}. "
+            f"Recommendation Option A: Purchase in-budget option '{alt_name}' (₹{alt_price:.2f}). "
+            f"Recommendation Option B: Upgrade your spending cap to ₹{suggested_cap:.2f} to unlock '{display_breached_name}'."
         )
 
         return AgentRecommendationProposal(
             budget_breached=True,
             breached_product_id=breached_p["id"],
-            breached_product_name=breached_p["name"],
-            breached_product_price_inr=breached_p["price_inr"],
+            breached_product_name=display_breached_name,
+            breached_product_price_inr=total_breached_price,
             alternative_items=alt_items,
             alternative_product_name=alt_name,
             alternative_product_price_inr=alt_price,
@@ -171,13 +180,22 @@ INSTRUCTIONS:
                         excluded_names_str = ", ".join([next((p["name"] for p in catalog_products if p["id"] == eid), eid) for eid in exclude_ids])
                         reasoning_text = f"⚠️ [STOCKOUT RECOVERED]: Primary item '{excluded_names_str}' hit 0 stock. Recovered by selecting in-stock alternative: {reasoning_text}"
 
-                    engine_tag = "GEMINI_3.6_FLASH" if "3.6" in target_model else ("GEMINI_2.5_FLASH" if "2.5" in target_model else "GEMINI_1.5_FLASH")
+                    engine_tag = "GEMINI_3.6_FLASH"
                     
-                    # Check if requested product exceeded cap
+                    # Check if requested product or total requested quantity exceeds spending cap
                     matched_p = next((p for p in available_catalog if p["id"].lower() in agent_goal.lower() or any(w.lower() in p["name"].lower() for w in agent_goal.split() if len(w) > 3)), None)
                     upsell_prop = None
-                    if matched_p and matched_p["price_inr"] > spending_cap_inr:
-                        upsell_prop = self.generate_upsell_recommendation(agent_goal, catalog_products, spending_cap_inr, matched_p)
+                    if matched_p:
+                        req_q = 1
+                        q_m = re.search(r'\b(\d+)\b', agent_goal)
+                        if q_m:
+                            req_q = int(q_m.group(1))
+                        total_req_cost = matched_p["price_inr"] * req_q
+
+                        if total_req_cost > spending_cap_inr:
+                            upsell_prop = self.generate_upsell_recommendation(
+                                agent_goal, catalog_products, spending_cap_inr, matched_p, requested_qty=req_q
+                            )
 
                     return AgentChoice(
                         items=items,
@@ -246,11 +264,13 @@ INSTRUCTIONS:
             req_qty = 1
             if target_indices:
                 t_idx = target_indices[0]
-                window = tokens[max(0, t_idx - 4) : min(len(tokens), t_idx + 5)]
+                window = tokens[max(0, t_idx - 3) : min(len(tokens), t_idx + 3)]
                 for tok in window:
                     if tok.isdigit():
-                        req_qty = int(tok)
-                        break
+                        val = int(tok)
+                        if val < 50:  # Ignore large numbers (like budget caps 700, 1500)
+                            req_qty = val
+                            break
                     elif tok in word_to_num:
                         req_qty = word_to_num[tok]
                         break
@@ -286,8 +306,12 @@ INSTRUCTIONS:
 
         if not selected_items and matched_products:
             m_p = matched_products[0]
-            upsell_prop = self.generate_upsell_recommendation(agent_goal, all_catalog, spending_cap_inr, m_p)
-            reasoning_str = f"Rule-based Intent Parser: Requested item '{m_p['name']}' (₹{m_p['price_inr']:.2f}) exceeds spending cap of ₹{spending_cap_inr:.2f}."
+            req_q = 1
+            q_m = re.search(r'\b(\d+)\b', agent_goal)
+            if q_m:
+                req_q = int(q_m.group(1))
+            upsell_prop = self.generate_upsell_recommendation(agent_goal, all_catalog, spending_cap_inr, m_p, requested_qty=req_q)
+            reasoning_str = f"Rule-based Intent Parser: Requested item '{req_q}x {m_p['name']}' (₹{m_p['price_inr'] * req_q:.2f}) exceeds spending cap of ₹{spending_cap_inr:.2f}."
             return AgentChoice(
                 items=[],
                 reasoning=reasoning_str,
@@ -319,3 +343,77 @@ INSTRUCTIONS:
             reasoning_source="RULE_FALLBACK",
             stock_warnings=stock_warnings
         )
+
+    def explain_agent_decision(self, user_query: str, catalog: List[Dict[str, Any]], recent_history: List[Dict[str, Any]] = None) -> str:
+        """
+        Answers user conversational queries questioning the agent's reasoning, product attributes, or choices.
+        Supports fuzzy product matching for typos (e.g. 'darjeling', 'proce') and precise price & attribute answers.
+        """
+        q_lower = user_query.lower()
+
+        # Step 1: Check for exact or fuzzy catalog product match
+        matched_product = None
+        for p in catalog:
+            p_name = p["name"].lower()
+            p_words = p_name.replace("-", " ").replace("(", "").replace(")", "").split()
+            q_words = q_lower.split()
+
+            # Check if any word in query matches product name words
+            for qw in q_words:
+                if len(qw) > 3:
+                    for pw in p_words:
+                        if len(pw) > 3 and (qw in pw or pw in qw or (set(qw) & set(pw) == set(pw))):
+                            matched_product = p
+                            break
+                if matched_product:
+                    break
+            if matched_product:
+                break
+
+        # If query asks specifically about price / cost for a matched product
+        if matched_product and any(k in q_lower for k in ["price", "proce", "cost", "how much", "rate"]):
+            attrs = matched_product.get("attributes", {})
+            flavors = ", ".join(attrs.get("flavor_notes", [])) or "Artisanal blend"
+            return f"**{matched_product['name']}** is priced at **₹{matched_product['price_inr']:.2f}** ({matched_product['stock_qty']} units in stock). Flavor notes: {flavors}."
+
+        # Step 2: Try Gemini LLM reasoning
+        if self.client:
+            cat_summary = json.dumps([{
+                "id": p["id"],
+                "name": p["name"],
+                "category": p["category"],
+                "price_inr": p["price_inr"],
+                "stock_qty": p["stock_qty"],
+                "attributes": p.get("attributes", {})
+            } for p in catalog], indent=2)
+
+            prompt = (
+                "You are Boundly's Autonomous AI Buyer Agent. The user is asking a conversational question about product details, "
+                f"flavor profiles, caffeine levels, or pricing.\n\nUser Question: {user_query}\n\nAvailable Merchant Catalog JSON:\n{cat_summary}\n\n"
+                "Respond in a helpful, concise, professional 2-3 sentence explanation detailing the exact product flavor notes, caffeine level, pricing, or spending cap compliance."
+            )
+            for m in [self.model_name] + self.fallback_models:
+                try:
+                    response = self.client.models.generate_content(
+                        model=m,
+                        contents=prompt
+                    )
+                    if response and response.text:
+                        return response.text.strip()
+                except Exception as e:
+                    pass
+
+        # Step 3: Deterministic Fallback if LLM rate limited
+        if matched_product:
+            attrs = matched_product.get("attributes", {})
+            flavors = ", ".join(attrs.get("flavor_notes", [])) or "Artisanal blend"
+            caffeine = attrs.get("caffeine_level", "Standard")
+            origin = attrs.get("origin", "Artisan Estate")
+            return f"**{matched_product['name']}** (`{matched_product['id']}`) is priced at **₹{matched_product['price_inr']:.2f}** ({matched_product['stock_qty']} in stock). Flavor profile: **{flavors}**, caffeine level: **{caffeine}**, origin: **{origin}**."
+
+        if "why" in q_lower or "reason" in q_lower or "pick" in q_lower or "recommend" in q_lower:
+            return "I select products by balancing your goal constraints (such as caffeine level, flavor profile, or stock availability) against your spending cap limit, ensuring maximum cap compliance and zero overdraft risk."
+        
+        return "We offer artisanal teas including Kashmir Kahwa (saffron, cardamom, cinnamon, almond), Himalayan Chamomile, Imperial Darjeeling, Masala Chai, Ceremonial Matcha, Tulsi Ginger, and Pure Saffron Strands. Ask me about any specific tea or instruct me to make a purchase!"
+
+

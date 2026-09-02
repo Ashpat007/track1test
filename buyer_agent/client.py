@@ -1,6 +1,6 @@
 """
 Independent Merchant API HTTP Client.
-Interacts with the merchant API over HTTP/REST only (zero direct DB access).
+Interacts with Merchant A (Aura Artisan Teas) and Federated Merchant B (Botanical Leaf Co.) over REST APIs.
 """
 
 import requests
@@ -67,5 +67,36 @@ class MerchantClient:
         if variant_id:
             params["variant_id"] = variant_id
         resp = requests.post(f"{self.base_url}/simulate-stockout", params=params, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+
+    # --- Federated Merchant B (Botanical Leaf Co.) Methods ---
+
+    def get_merchant_b_catalog(self, in_stock_only: bool = True) -> Dict[str, Any]:
+        params = {"in_stock_only": str(in_stock_only).lower()}
+        resp = requests.get(f"{self.base_url}/merchant-b/catalog", params=params, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_merchant_b_cart(self, items: list) -> Dict[str, Any]:
+        payload = {"items": items}
+        resp = requests.post(f"{self.base_url}/merchant-b/cart", json=payload, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_merchant_b_checkout_order(self, cart_id: str, buyer_name: str = "AI Buyer Agent") -> Dict[str, Any]:
+        payload = {"cart_id": cart_id, "buyer_name": buyer_name}
+        resp = requests.post(f"{self.base_url}/merchant-b/checkout/create-order", json=payload, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+
+    def verify_merchant_b_payment(self, order_id: str, razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str) -> Dict[str, Any]:
+        payload = {
+            "order_id": order_id,
+            "razorpay_order_id": razorpay_order_id,
+            "razorpay_payment_id": razorpay_payment_id,
+            "razorpay_signature": razorpay_signature
+        }
+        resp = requests.post(f"{self.base_url}/merchant-b/checkout/verify-payment", json=payload, timeout=5)
         resp.raise_for_status()
         return resp.json()

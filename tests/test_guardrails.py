@@ -107,18 +107,19 @@ def test_cart_stock_reservation_and_expiration():
     assert tea1_stock_after == tea1_stock_before
 
 def test_global_emergency_halt_kill_switch():
-    # 1. Halt system via real HTTP POST /api/agent-halt
-    halt_res = requests.post(f"{SERVER_URL}/api/agent-halt").json()
-    assert halt_res["halted"] is True
+    try:
+        # 1. Halt system via real HTTP POST /api/agent-halt
+        halt_res = requests.post(f"{SERVER_URL}/api/agent-halt").json()
+        assert halt_res["status"] == "EMERGENCY_HALTED"
 
-    # 2. Attempt cart creation via real HTTP POST /cart -> Must return 503 Emergency Halt
-    cart_req = requests.post(f"{SERVER_URL}/cart", json={"items": [{"product_id": "tea-001", "quantity": 1}]})
-    assert cart_req.status_code == 503
-    assert "EMERGENCY_SYSTEM_HALT" in cart_req.json()["detail"]
-
-    # 3. Resume system via real HTTP POST /api/agent-resume
-    resume_res = requests.post(f"{SERVER_URL}/api/agent-resume").json()
-    assert resume_res["halted"] is False
+        # 2. Attempt cart creation via real HTTP POST /cart -> Must return 503 Emergency Halt
+        cart_req = requests.post(f"{SERVER_URL}/cart", json={"items": [{"product_id": "tea-001", "quantity": 1}]})
+        assert cart_req.status_code == 503
+        assert "EMERGENCY_SYSTEM_HALT" in cart_req.json()["detail"]
+    finally:
+        # 3. Resume system via real HTTP POST /api/agent-resume
+        resume_res = requests.post(f"{SERVER_URL}/api/agent-resume").json()
+        assert resume_res["status"] == "ACTIVE"
 
     # 4. Verify normal operations restored via real HTTP POST /cart
     cart_req2 = requests.post(f"{SERVER_URL}/cart", json={"items": [{"product_id": "tea-001", "quantity": 1}]})

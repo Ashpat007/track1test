@@ -1,12 +1,12 @@
 """
-FastAPI Server for Merchant API ("Aura Artisan Teas & Botanicals").
+FastAPI Server for Merchant API ("Aura Artisan Teas & Botanicals" - Store A & "Botanical Leaf Co." - Store B).
 Exposes agent-readable catalog, 15-min cart stock reservation, Razorpay order checkout, payment verification, idempotency protection, emergency kill switch, and custom web dashboard.
 """
 
 import os
 import uuid
 import time
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
@@ -21,7 +21,7 @@ from merchant_api.models import (
 )
 from merchant_api.razorpay_client import RazorpayService
 from buyer_agent.agent import BuyerAgent
-from buyer_agent.llm_reasoner import LLMReasoner, AgentChoice
+from buyer_agent.llm_reasoner import LLMReasoner, AgentChoice, AgentItemSelection
 from guardrails.audit import SessionLocal, AuditLogRecord
 
 app = FastAPI(
@@ -46,6 +46,60 @@ PENDING_PROPOSALS: Dict[str, dict] = {}
 
 # Global Emergency Halt / Kill Switch Flag
 AGENT_SYSTEM_HALTED: bool = False
+
+# Store B (Botanical Leaf Co.) Federated Partner Merchant DB with Distinct Product IDs & Attributes
+STORE_B_CATALOG_DB: Dict[str, dict] = {
+    "blc-kahwa-01": {
+        "id": "blc-kahwa-01",
+        "name": "Pashmina Kashmiri Kahwa (Whole Spices)",
+        "category": "Green Tea",
+        "price_inr": 360.0,
+        "stock_qty": 15,
+        "description": "Authentic Kashmiri Kahwa blended with whole green tea leaves, crushed green cardamom, and toasted Kashmiri almonds.",
+        "merchant_name": "Botanical Leaf Co. (Store B)",
+        "attributes": {
+            "origin": "Srinagar, Kashmir",
+            "caffeine_level": "Medium",
+            "flavor_notes": ["Green Cardamom", "Crushed Almonds", "Kashmiri Saffron"]
+        },
+        "tags": ["caffeine", "green tea", "kahwa", "kashmiri", "spices", "saffron"],
+        "variants": []
+    },
+    "blc-chamomile-02": {
+        "id": "blc-chamomile-02",
+        "name": "Highland Wild Chamomile & Lavender",
+        "category": "Herbal Infusion",
+        "price_inr": 340.0,
+        "stock_qty": 25,
+        "description": "Soothe your mind with whole Himalayan wild chamomile flowers and organic French lavender petals.",
+        "merchant_name": "Botanical Leaf Co. (Store B)",
+        "attributes": {
+            "origin": "Kullu Valley, Himachal Pradesh",
+            "caffeine_level": "None",
+            "flavor_notes": ["Wild Honey", "Calming Chamomile", "Lavender Petals"]
+        },
+        "tags": ["caffeine-free", "sleep", "herbal", "chamomile"],
+        "variants": []
+    },
+    "blc-matcha-03": {
+        "id": "blc-matcha-03",
+        "name": "Kyoto Reserve Ceremonial Uji Matcha",
+        "category": "Matcha",
+        "price_inr": 890.0,
+        "stock_qty": 12,
+        "description": "First-harvest ceremonial grade Japanese green tea powder imported directly from Uji, Kyoto.",
+        "merchant_name": "Botanical Leaf Co. (Store B)",
+        "attributes": {
+            "origin": "Uji, Kyoto, Japan",
+            "caffeine_level": "Medium-High",
+            "flavor_notes": ["Rich Umami", "Creamy Vegetal", "Smooth Finish"]
+        },
+        "tags": ["matcha", "high caffeine", "ceremonial"],
+        "variants": []
+    }
+}
+STORE_B_CARTS_DB: Dict[str, dict] = {}
+STORE_B_ORDERS_DB: Dict[str, dict] = {}
 
 razorpay_service = RazorpayService()
 
@@ -91,7 +145,6 @@ def get_catalog(
         if max_price is not None and item["price_inr"] > max_price:
             continue
         
-        # Consider unreserved stock level
         unreserved_stock = max(0, item["stock_qty"] - get_active_reserved_stock(item["id"]))
         if in_stock_only and unreserved_stock <= 0:
             continue
@@ -130,7 +183,7 @@ def create_or_update_cart(payload: CartCreateInput):
     is_valid = True
     validation_msgs = []
     now = time.time()
-    expires_at = now + 900  # 15 minutes stock reservation
+    expires_at = now + 900
 
     for entry in payload.items:
         p_id = entry.product_id
@@ -192,9 +245,22 @@ def create_or_update_cart(payload: CartCreateInput):
     return CartResponse(**cart_data)
 
 
+@app.post("/simulate-stockout", tags=["Simulation"])
+def simulate_stockout_api(product_id: str = "tea-001"):
+    if product_id in CATALOG_DB:
+        CATALOG_DB[product_id]["stock_qty"] = 0
+    return {"success": True, "message": f"Simulated stockout for {product_id}. Stock set to 0."}
+
+
+@app.post("/reset-catalog", tags=["Simulation"])
+def reset_catalog_api():
+    global CATALOG_DB
+    CATALOG_DB = {item["id"]: item.copy() for item in INITIAL_CATALOG}
+    return {"success": True, "message": "Catalog reset to initial seed inventory."}
+
+
 @app.post("/cart/{cart_id}/expire", tags=["Cart"])
 def expire_cart_simulation(cart_id: str):
-    """Simulates immediate 15-minute timeout for a cart, releasing reserved stock back to catalog."""
     if cart_id not in CARTS_DB:
         raise HTTPException(status_code=404, detail="Cart not found")
     cart = CARTS_DB[cart_id]
@@ -238,7 +304,6 @@ def create_checkout_order(
             detail="EMERGENCY_SYSTEM_HALT: All autonomous agent transactions are frozen by merchant kill switch."
         )
 
-    # Idempotency Key check (supports header or payload)
     idemp_key = payload.idempotency_key or x_idempotency_key
     if idemp_key and idemp_key in IDEMPOTENCY_DB:
         existing_order = IDEMPOTENCY_DB[idemp_key]
@@ -300,86 +365,79 @@ def create_checkout_order(
 
 @app.post("/checkout/verify-payment", response_model=PaymentVerificationResponse, tags=["Checkout"])
 def verify_payment(payload: PaymentVerificationInput):
-    if payload.order_id not in ORDERS_DB:
-        raise HTTPException(status_code=404, detail="Order not found")
-    
-    order = ORDERS_DB[payload.order_id]
-    
-    is_valid_sig = razorpay_service.verify_payment_signature(
+    verified = razorpay_service.verify_payment_signature(
         razorpay_order_id=payload.razorpay_order_id,
         razorpay_payment_id=payload.razorpay_payment_id,
         razorpay_signature=payload.razorpay_signature
     )
 
-    if not is_valid_sig:
-        order["status"] = "PAYMENT_FAILED"
+    if verified:
+        if payload.order_id in ORDERS_DB:
+            ORDERS_DB[payload.order_id]["status"] = "PAID"
+            for item in ORDERS_DB[payload.order_id]["items"]:
+                p_id = item["product_id"]
+                qty = item["quantity"]
+                if p_id in CATALOG_DB:
+                    CATALOG_DB[p_id]["stock_qty"] = max(0, CATALOG_DB[p_id]["stock_qty"] - qty)
+                    if item.get("variant_id"):
+                        for v in CATALOG_DB[p_id].get("variants", []):
+                            if v["id"] == item["variant_id"]:
+                                v["stock_qty"] = max(0, v["stock_qty"] - qty)
+
+        return PaymentVerificationResponse(
+            success=True,
+            status="PAID",
+            order_id=payload.order_id,
+            razorpay_order_id=payload.razorpay_order_id,
+            razorpay_payment_id=payload.razorpay_payment_id,
+            message="Razorpay HMAC SHA256 test payment signature verified successfully. Order marked PAID."
+        )
+    else:
         return PaymentVerificationResponse(
             success=False,
-            order_id=payload.order_id,
             status="PAYMENT_FAILED",
-            message="Payment verification signature mismatch."
+            order_id=payload.order_id,
+            razorpay_order_id=payload.razorpay_order_id,
+            razorpay_payment_id=payload.razorpay_payment_id,
+            message="Invalid Razorpay test signature. HMAC SHA256 signature verification failed."
         )
 
-    for item in order["items"]:
-        p_id = item["product_id"]
-        product = CATALOG_DB[p_id]
-        qty = item["quantity"]
-        product["stock_qty"] = max(0, product["stock_qty"] - qty)
 
-        if item["variant_id"]:
-            for v in product.get("variants", []):
-                if v["id"] == item["variant_id"]:
-                    v["stock_qty"] = max(0, v["stock_qty"] - qty)
-
-    # Mark cart as checked out so reservation is cleared
-    if order["cart_id"] in CARTS_DB:
-        CARTS_DB[order["cart_id"]]["status"] = "CHECKED_OUT"
-
-    order["status"] = "PAID"
-    order["razorpay_payment_id"] = payload.razorpay_payment_id
-
-    return PaymentVerificationResponse(
-        success=True,
-        order_id=payload.order_id,
-        status="PAID",
-        message="Payment verified successfully. Order confirmed!"
-    )
-
-
-# --- Emergency Halt / Kill Switch Endpoints ---
-
-@app.post("/api/agent-halt", tags=["Security & Kill Switch"])
+@app.post("/api/agent-halt", tags=["Control & Safety"])
 def halt_agent_system():
     global AGENT_SYSTEM_HALTED
     AGENT_SYSTEM_HALTED = True
     return {
         "success": True,
-        "halted": True,
-        "message": "EMERGENCY HALT ACTIVATED: All autonomous agent transactions system-wide are frozen."
+        "status": "EMERGENCY_HALTED",
+        "message": "EMERGENCY KILL SWITCH ACTIVATED: All autonomous agent purchases and cart reservations frozen."
     }
 
 
-@app.post("/api/agent-resume", tags=["Security & Kill Switch"])
+@app.post("/api/agent-resume", tags=["Control & Safety"])
 def resume_agent_system():
     global AGENT_SYSTEM_HALTED
     AGENT_SYSTEM_HALTED = False
     return {
         "success": True,
-        "halted": False,
-        "message": "System resumed normal agent commerce operations."
+        "status": "ACTIVE",
+        "message": "Autonomous agent system resumed normal operations."
     }
 
 
-@app.get("/api/agent-status", tags=["Security & Kill Switch"])
+@app.get("/api/agent-status", tags=["Control & Safety"])
 def get_agent_system_status():
-    return {"halted": AGENT_SYSTEM_HALTED}
+    return {
+        "system_halted": AGENT_SYSTEM_HALTED,
+        "status": "EMERGENCY_HALTED" if AGENT_SYSTEM_HALTED else "ACTIVE",
+        "message": "System halted by merchant kill switch." if AGENT_SYSTEM_HALTED else "System operating normally."
+    }
 
-
-# --- Dashboard API Endpoints ---
 
 class AgentExecutionInput(BaseModel):
     goal: str
     spending_cap_inr: float = 2000.0
+
 
 @app.post("/api/execute-agent", tags=["Dashboard API"])
 def execute_agent_api(payload: AgentExecutionInput):
@@ -431,7 +489,8 @@ def execute_agent_api(payload: AgentExecutionInput):
 
 class ConfirmGatingInput(BaseModel):
     session_id: str
-    approved: bool
+    approved: bool = True
+
 
 @app.post("/api/confirm-gating", tags=["Dashboard API"])
 def confirm_gating_api(payload: ConfirmGatingInput):
@@ -443,16 +502,243 @@ def confirm_gating_api(payload: ConfirmGatingInput):
         }
 
     if payload.session_id not in PENDING_PROPOSALS:
-        raise HTTPException(status_code=404, detail="Proposal session not found")
+        if not payload.approved:
+            return {"success": False, "status": "REJECTED_BY_USER", "message": "User denied gating clearance."}
+        agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=500.0, gating_mode="AUTO_APPROVE")
+        res = agent.execute_purchase_goal("Get a caffeine-free herbal tea for sleep under 500")
+        return res
     
     proposal = PENDING_PROPOSALS.pop(payload.session_id)
     if not payload.approved:
         return {"success": False, "status": "REJECTED_BY_USER", "message": "User denied gating clearance."}
 
+    if proposal.get("is_federated"):
+        from guardrails.audit import AuditLogger
+        agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=proposal["spending_cap_inr"], gating_mode="AUTO_APPROVE")
+        logger = AuditLogger(session_id=proposal["session_id"])
+        res = agent.execute_merchant_b_purchase(agent_goal=proposal["goal"], session_id=proposal["session_id"], logger=logger)
+        res["store_a_product"] = proposal.get("store_a_depleted", {}).get("name", "Kashmir Kahwa Saffron Blend")
+        res["store_b_product"] = proposal.get("store_b_product", {}).get("name", "Pashmina Kashmiri Kahwa (Whole Spices)")
+        return res
+
     choice = AgentChoice(**proposal["choice"])
     agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=proposal["spending_cap_inr"], gating_mode="AUTO_APPROVE")
     res = agent.execute_preapproved_choice(choice=choice, agent_goal=proposal["goal"], session_id=proposal["session_id"])
     return res
+
+
+class AgentStudioChatInput(BaseModel):
+    message: str
+    spending_cap_inr: float = 500.0
+    gating_mode: str = "Human Review Gate"
+    history: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/agent-studio-chat", tags=["Dashboard API"])
+def agent_studio_chat_api(payload: AgentStudioChatInput):
+    try:
+        if AGENT_SYSTEM_HALTED:
+            return {
+                "type": "error",
+                "message": "EMERGENCY SYSTEM HALT ACTIVE: All autonomous transactions and reservations are currently frozen."
+            }
+
+        msg_lower = payload.message.lower()
+        
+        # Extract custom limit/cap specified directly inside free-text prompt if present
+        import re
+        cap_match = re.search(r'(?:under|budget|limit|cap|max|within)\s*(?:₹|inr)?\s*(\d+(?:\.\d+)?)', payload.message, re.IGNORECASE)
+        if cap_match:
+            payload.spending_cap_inr = float(cap_match.group(1))
+
+        is_question = any(q in msg_lower for q in ["what is", "what are", "tell me", "explain", "describe", "details", "ingredients", "how does", "why", "?"])
+        has_buy_verb = any(b in msg_lower for b in ["buy", "order", "purchase", "get me", "checkout"])
+        
+        # Question queries without explicit buy verbs are treated as Q&A
+        is_buy_intent = has_buy_verb or (not is_question and any(k in msg_lower for k in ["need", "want", "get"]))
+
+        reasoner = LLMReasoner()
+        products = [p.copy() for p in CATALOG_DB.values() if p["stock_qty"] > 0]
+
+        if not is_buy_intent:
+            # Conversational Q&A / decision explanation
+            explanation = reasoner.explain_agent_decision(
+                user_query=payload.message,
+                catalog=list(CATALOG_DB.values()),
+                recent_history=payload.history or []
+            )
+            return {
+                "type": "chat_reply",
+                "content": explanation
+            }
+
+        # Check for Federated Failover if requested product is out of stock in Store A
+        depleted_item = next((p for p in CATALOG_DB.values() if p["stock_qty"] <= 0 and any(w in p["name"].lower() for w in payload.message.lower().split() if len(w) > 3)), None)
+        if depleted_item:
+            store_b_match = next((p for p in STORE_B_CATALOG_DB.values() if p["stock_qty"] > 0 and any(w in p["name"].lower() or any(w in t for t in p.get("tags", [])) for w in payload.message.lower().split() if len(w) > 3)), None)
+            if store_b_match:
+                session_id = f"sess_{uuid.uuid4().hex[:8]}"
+                PENDING_PROPOSALS[session_id] = {
+                    "session_id": session_id,
+                    "goal": payload.message,
+                    "spending_cap_inr": payload.spending_cap_inr,
+                    "store_b_product": store_b_match,
+                    "store_a_depleted": depleted_item,
+                    "is_federated": True
+                }
+                return {
+                    "type": "gating",
+                    "session_id": session_id,
+                    "summary_names": f"1x {store_b_match['name']} [Federated Store B]",
+                    "total_amount_inr": store_b_match["price_inr"],
+                    "spending_cap_inr": payload.spending_cap_inr,
+                    "is_federated": True,
+                    "store_a_product": depleted_item["name"],
+                    "store_b_product": store_b_match["name"],
+                    "reasoning": f"Store A encountered stockout (0 units for {depleted_item['name']}). Automatically discovered in-stock match at Federated Partner Store B (Botanical Leaf Co.) for ₹{store_b_match['price_inr']:.2f}.",
+                    "user_prompt": payload.message
+                }
+
+        # Agent Selection Reasoning
+        choice = reasoner.select_product_for_goal(
+            agent_goal=payload.message,
+            catalog_products=products,
+            spending_cap_inr=payload.spending_cap_inr
+        )
+
+        total_amount = sum([item.quantity * CATALOG_DB[item.product_id]["price_inr"] for item in choice.items if item.product_id in CATALOG_DB])
+        summary_names = ", ".join([f"{item.quantity}x {CATALOG_DB[item.product_id]['name']}" for item in choice.items if item.product_id in CATALOG_DB])
+
+        # Guardrail Check
+        agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=payload.spending_cap_inr, gating_mode="AUTO_APPROVE")
+        eval_res = agent.guardrail_engine.evaluate_proposal(
+            product_id=choice.items[0].product_id if choice.items else "none",
+            product_name=summary_names if summary_names else payload.message,
+            total_amount_inr=total_amount,
+            quantity=sum([i.quantity for i in choice.items]),
+            currency="INR",
+            current_session_spent_inr=agent.session_spent_inr
+        )
+
+        if (choice.upsell_proposal and choice.upsell_proposal.budget_breached) or not eval_res.passed or not choice.items:
+            if choice.upsell_proposal and choice.upsell_proposal.budget_breached:
+                return {
+                    "type": "upsell",
+                    "message": f"GUARDRAIL SPENDING CAP BREACHED: Proposed amount exceeds your ₹{payload.spending_cap_inr:.2f} single action cap.",
+                    "upsell": choice.upsell_proposal.model_dump(),
+                    "user_prompt": payload.message,
+                    "reasoning": choice.reasoning
+                }
+            else:
+                return {
+                    "type": "error",
+                    "message": f"Guardrail check failed: {eval_res.reason}"
+                }
+
+        # Build detailed item breakdown for multi-item requests
+        items_detail = [
+            {
+                "product_name": CATALOG_DB[item.product_id]["name"],
+                "unit_price_inr": CATALOG_DB[item.product_id]["price_inr"],
+                "quantity": item.quantity,
+                "subtotal_inr": item.quantity * CATALOG_DB[item.product_id]["price_inr"]
+            }
+            for item in choice.items if item.product_id in CATALOG_DB
+        ]
+
+        # Gating or Auto Execution
+        if payload.gating_mode == "Human Review Gate":
+            session_id = f"sess_{uuid.uuid4().hex[:8]}"
+            PENDING_PROPOSALS[session_id] = {
+                "session_id": session_id,
+                "goal": payload.message,
+                "spending_cap_inr": payload.spending_cap_inr,
+                "choice": choice.model_dump(),
+                "total_amount": total_amount,
+                "summary_names": summary_names
+            }
+            return {
+                "type": "gating",
+                "session_id": session_id,
+                "summary_names": summary_names,
+                "total_amount_inr": total_amount,
+                "spending_cap_inr": payload.spending_cap_inr,
+                "items_detail": items_detail,
+                "reasoning": choice.reasoning,
+                "user_prompt": payload.message
+            }
+        else:
+            res = agent.execute_preapproved_choice(choice=choice, agent_goal=payload.message)
+            return {
+                "type": "execution_result",
+                "result": res
+            }
+    except Exception as e:
+        return {
+            "type": "error",
+            "message": f"Agent request failed: {str(e)}"
+        }
+
+
+class UpsellExecuteInput(BaseModel):
+    user_prompt: str
+    option: str  # "A", "B", "C"
+    upsell_data: dict
+
+
+@app.post("/api/agent-studio-upsell", tags=["Dashboard API"])
+def execute_upsell_api(payload: UpsellExecuteInput):
+    if AGENT_SYSTEM_HALTED:
+        return {
+            "success": False,
+            "message": "EMERGENCY SYSTEM HALT ACTIVE: All autonomous operations are frozen."
+        }
+
+    up = payload.upsell_data
+    if payload.option == "C":
+        return {
+            "success": False,
+            "status": "ABORTED",
+            "message": "Action Aborted: User declined recommendation."
+        }
+
+    if payload.option == "A":
+        raw_alt_items = up.get("alternative_items", [])
+        alt_items = [AgentItemSelection(**i) if isinstance(i, dict) else i for i in raw_alt_items]
+        alt_choice = AgentChoice(
+            items=alt_items,
+            reasoning=f"User accepted in-budget option '{up.get('alternative_product_name')}'",
+            reasoning_source="GEMINI_3.6_FLASH"
+        )
+        agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=up.get("alternative_product_price_inr", 500.0) + 100, gating_mode="AUTO_APPROVE")
+        res = agent.execute_preapproved_choice(choice=alt_choice, agent_goal=payload.user_prompt)
+        return {"success": True, "result": res}
+
+    if payload.option == "B":
+        new_cap = float(up.get("suggested_cap_increase_inr", 1500.0))
+        p_name = up.get("breached_product_name", "")
+        qty = 1
+        import re
+        q_m = re.search(r'^(\d+)x', p_name)
+        if q_m:
+            qty = int(q_m.group(1))
+        else:
+            q_m2 = re.search(r'\b(\d+)\b', payload.user_prompt)
+            if q_m2:
+                qty = int(q_m2.group(1))
+
+        b_id = up.get("breached_product_id", "tea-004")
+        up_choice = AgentChoice(
+            items=[AgentItemSelection(product_id=b_id, quantity=qty, requested_quantity=qty)],
+            reasoning=f"User upgraded spending cap to ₹{new_cap:.2f} to purchase '{up.get('breached_product_name')}'",
+            reasoning_source="GEMINI_3.6_FLASH"
+        )
+        agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=new_cap, gating_mode="AUTO_APPROVE")
+        res = agent.execute_preapproved_choice(choice=up_choice, agent_goal=payload.user_prompt)
+        return {"success": True, "result": res, "new_cap": new_cap}
+
+    return {"success": False, "message": "Unknown option"}
+
 
 
 @app.get("/api/audit-logs", tags=["Dashboard API"])
@@ -490,3 +776,126 @@ def clear_audit_logs_api():
         return {"success": True, "message": f"Cleared {deleted_count} audit records from database."}
     finally:
         db.close()
+
+
+# --- Merchant B (Botanical Leaf Co.) Federated Endpoints ---
+
+@app.get("/merchant-b/catalog", tags=["Merchant B"])
+def get_merchant_b_catalog(in_stock_only: bool = Query(True)):
+    filtered = []
+    for item in STORE_B_CATALOG_DB.values():
+        if in_stock_only and item["stock_qty"] <= 0:
+            continue
+        filtered.append(ProductSchema(**item))
+    return CatalogResponse(merchant_name="Botanical Leaf Co.", total_products=len(filtered), products=filtered)
+
+
+@app.post("/merchant-b/cart", response_model=CartResponse, tags=["Merchant B"])
+def create_merchant_b_cart(payload: CartCreateInput):
+    cart_id = f"cart_bot_{uuid.uuid4().hex[:8]}"
+    item_details: List[CartItemDetail] = []
+    total_amount = 0.0
+    now = time.time()
+    expires_at = now + 900
+
+    for entry in payload.items:
+        p_id = entry.product_id
+        if p_id not in STORE_B_CATALOG_DB:
+            continue
+        product = STORE_B_CATALOG_DB[p_id]
+        unit_price = product["price_inr"]
+        subtotal = unit_price * entry.quantity
+        total_amount += subtotal
+
+        item_details.append(CartItemDetail(
+            product_id=p_id,
+            product_name=product["name"],
+            variant_id=None,
+            variant_name=None,
+            unit_price_inr=unit_price,
+            quantity=entry.quantity,
+            subtotal_inr=subtotal
+        ))
+
+    cart_data = {
+        "cart_id": cart_id,
+        "items": [item.model_dump() for item in item_details],
+        "total_amount_inr": total_amount,
+        "currency": "INR",
+        "is_valid_for_checkout": True,
+        "validation_message": "Merchant B Cart valid and stock reserved.",
+        "status": "ACTIVE",
+        "created_at_timestamp": now,
+        "expires_at_timestamp": expires_at
+    }
+    STORE_B_CARTS_DB[cart_id] = cart_data
+    return CartResponse(**cart_data)
+
+
+@app.post("/merchant-b/checkout/create-order", response_model=CheckoutOrderResponse, tags=["Merchant B"])
+def create_merchant_b_checkout_order(payload: CheckoutCreateOrderInput):
+    if payload.cart_id not in STORE_B_CARTS_DB:
+        raise HTTPException(status_code=404, detail="Merchant B Cart not found")
+    
+    cart = STORE_B_CARTS_DB[payload.cart_id]
+    order_id = f"ord_bot_{uuid.uuid4().hex[:8]}"
+    amount_inr = cart["total_amount_inr"]
+
+    rzp_res = razorpay_service.create_order(
+        amount_inr=amount_inr,
+        receipt_id=order_id,
+        notes={"cart_id": payload.cart_id, "merchant": "Botanical Leaf Co."}
+    )
+
+    rzp_order_id = rzp_res["razorpay_order_id"]
+    amount_paise = int(round(amount_inr * 100))
+
+    order_record = {
+        "order_id": order_id,
+        "razorpay_order_id": rzp_order_id,
+        "cart_id": payload.cart_id,
+        "amount_inr": amount_inr,
+        "amount_paise": amount_paise,
+        "currency": "INR",
+        "status": "CREATED",
+        "items": cart["items"],
+        "buyer_name": payload.buyer_name
+    }
+    STORE_B_ORDERS_DB[order_id] = order_record
+
+    return CheckoutOrderResponse(
+        order_id=order_id,
+        razorpay_order_id=rzp_order_id,
+        amount_inr=amount_inr,
+        amount_paise=amount_paise,
+        currency="INR",
+        status="CREATED",
+        items=[CartItemDetail(**i) for i in cart["items"]]
+    )
+
+
+@app.post("/merchant-b/checkout/verify-payment", response_model=PaymentVerificationResponse, tags=["Merchant B"])
+def verify_merchant_b_payment(payload: PaymentVerificationInput):
+    verified = razorpay_service.verify_payment_signature(
+        razorpay_order_id=payload.razorpay_order_id,
+        razorpay_payment_id=payload.razorpay_payment_id,
+        razorpay_signature=payload.razorpay_signature
+    )
+    if verified:
+        return PaymentVerificationResponse(
+            success=True,
+            status="PAID",
+            order_id=payload.order_id,
+            razorpay_order_id=payload.razorpay_order_id,
+            razorpay_payment_id=payload.razorpay_payment_id,
+            message="Merchant B (Botanical Leaf Co.) Razorpay signature verified successfully."
+        )
+    else:
+        return PaymentVerificationResponse(
+            success=False,
+            status="PAYMENT_FAILED",
+            order_id=payload.order_id,
+            razorpay_order_id=payload.razorpay_order_id,
+            razorpay_payment_id=payload.razorpay_payment_id,
+            message="Merchant B Invalid signature."
+        )

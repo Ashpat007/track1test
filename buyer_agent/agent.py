@@ -2,7 +2,7 @@
 Autonomous Buyer Agent Core Orchestrator.
 Orchestrates: Catalog Fetch -> LLM Reasoning -> Guardrail Evaluation -> Gating Clearance -> Cart & Checkout API execution -> Audit Logging.
 Supports multi-product cart selections (e.g. 2x Kahwa + 1x Matcha).
-Includes direct execution of pre-approved selections to guarantee Gating Determinism (Approve-X-Execute-X) & Upsell Recommendation Engine.
+Includes Multi-Merchant Federated Cross-Store Stockout Recovery (Store A ➔ Store B failover).
 """
 
 import os
@@ -39,8 +39,122 @@ class BuyerAgent:
         self.gating = GatingCheckpoint(mode=gating_mode)
         self.llm_reasoner = LLMReasoner()
         self.spending_cap_inr = spending_cap_inr
-        # Cumulative session spend tracking across consecutive purchase calls
         self.session_spent_inr = 0.0
+
+    def execute_merchant_b_purchase(
+        self,
+        agent_goal: str,
+        session_id: str,
+        logger: AuditLogger
+    ) -> Dict[str, Any]:
+        """Executes Federated Cross-Merchant purchase on Store B (Botanical Leaf Co.) when Store A stock is 0."""
+        try:
+            console.print(f"\n[bold yellow][FEDERATED] Store A stockout detected. Routing to Store B (Botanical Leaf Co.)...[/bold yellow]")
+        except Exception:
+            pass
+        
+        try:
+            b_catalog = self.client.get_merchant_b_catalog(in_stock_only=True)
+            b_products = b_catalog.get("products", [])
+        except Exception as e:
+            err_msg = f"Failed to reach Store B Merchant Catalog: {str(e)}"
+            return {"success": False, "status": "API_ERROR", "message": err_msg, "session_id": session_id}
+
+        target_p = None
+        for p in b_products:
+            kw_match = any((w in p["name"].lower() or w in p["category"].lower() or any(w in t.lower() for t in p["tags"])) for w in agent_goal.lower().split() if len(w) > 2)
+            if kw_match:
+                target_p = p
+                break
+        
+        if not target_p and b_products:
+            target_p = b_products[0]
+
+        if not target_p:
+            return {"success": False, "status": "NO_STOCK_FEDERATED", "message": "No matching stock across Store A and Store B.", "session_id": session_id}
+
+        u_price = target_p["price_inr"]
+        summary_names = f"1x {target_p['name']}"
+
+        # Evaluate Guardrails
+        eval_res = self.guardrail_engine.evaluate_proposal(
+            product_id=target_p["id"],
+            product_name=summary_names,
+            total_amount_inr=u_price,
+            quantity=1,
+            currency="INR",
+            current_session_spent_inr=self.session_spent_inr
+        )
+
+        if not eval_res.passed:
+            return {"success": False, "status": "BLOCKED_GUARDRAIL", "reason": eval_res.rejection_reason, "session_id": session_id}
+
+        # Gating Clearance
+        is_approved = self.gating.request_approval(
+            product_summary=f"{summary_names} [STORE B: BOTANICAL LEAF CO.]",
+            total_amount_inr=u_price,
+            llm_reasoning=f"Store A encountered stockout (0 units). Automatically failing over to Federated Merchant B (Botanical Leaf Co.) for in-stock {target_p['name']} at ₹{u_price:.2f}.",
+            spending_cap_inr=self.spending_cap_inr,
+            items_detail=[{"product_id": target_p["id"], "product_name": target_p["name"], "unit_price_inr": u_price, "quantity": 1, "subtotal_inr": u_price}]
+        )
+
+        if not is_approved:
+            return {"success": False, "status": "REJECTED_BY_USER", "message": "User denied gating clearance.", "session_id": session_id}
+
+        # Checkout on Store B
+        cart_res = self.client.create_merchant_b_cart([{"product_id": target_p["id"], "quantity": 1}])
+        checkout_res = self.client.create_merchant_b_checkout_order(cart_id=cart_res["cart_id"])
+        
+        rzp_order_id = checkout_res["razorpay_order_id"]
+        merchant_order_id = checkout_res["order_id"]
+        simulated_payment_id = f"pay_bot_{uuid.uuid4().hex[:10]}"
+
+        key_secret = os.getenv("RAZORPAY_KEY_SECRET", "sr5phj3GIj2gWBIRTmunq8Nh")
+        sig = hmac.new(
+            bytes(key_secret, 'utf-8'),
+            bytes(f"{rzp_order_id}|{simulated_payment_id}", 'utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        pay_res = self.client.verify_merchant_b_payment(
+            order_id=merchant_order_id,
+            razorpay_order_id=rzp_order_id,
+            razorpay_payment_id=simulated_payment_id,
+            razorpay_signature=sig
+        )
+
+        if pay_res.get("success"):
+            self.session_spent_inr += u_price
+            logger.log_step(
+                "FEDERATED_PAYMENT_EXECUTION",
+                agent_goal=agent_goal,
+                proposed_action=f"Purchased: {summary_names} (Store B: Botanical Leaf Co.)",
+                llm_reasoning="Federated Cross-Merchant Failover to Botanical Leaf Co. (Store B) successful due to Store A stockout.",
+                proposed_amount_inr=u_price,
+                guardrail_passed=True,
+                gate_status="APPROVED",
+                razorpay_order_id=rzp_order_id,
+                razorpay_payment_id=simulated_payment_id,
+                outcome_status="FEDERATED_TEST_SUCCESS",
+                details={"store": "Botanical Leaf Co. (Store B)", "order_details": pay_res}
+            )
+
+            return {
+                "success": True,
+                "status": "SUCCESS",
+                "session_id": session_id,
+                "summary_names": f"{summary_names} (Store B)",
+                "amount_inr": u_price,
+                "remaining_balance_inr": self.spending_cap_inr - u_price,
+                "session_spent_inr": self.session_spent_inr,
+                "razorpay_order_id": rzp_order_id,
+                "razorpay_payment_id": simulated_payment_id,
+                "store_name": "Botanical Leaf Co. (Store B)",
+                "federated_failover": True,
+                "audit_session_id": session_id
+            }
+        else:
+            return {"success": False, "status": "PAYMENT_DECLINED", "message": pay_res.get("message"), "session_id": session_id}
 
     def execute_preapproved_choice(
         self,
@@ -48,10 +162,6 @@ class BuyerAgent:
         agent_goal: str,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Executes a pre-approved AgentChoice selection directly without re-invoking LLM reasoning.
-        Guarantees gating determinism (prevents Approve-X-Execute-Y discrepancy).
-        """
         session_id = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         logger = AuditLogger(session_id=session_id)
 
@@ -160,6 +270,11 @@ class BuyerAgent:
             rzp_order_id = checkout_res["razorpay_order_id"]
             merchant_order_id = checkout_res["order_id"]
         except Exception as e:
+            # Check if cart creation failed due to stockout during checkout
+            if "Insufficient stock" in str(e) or "stock" in str(e).lower():
+                console.print(f"[bold yellow]⚠️ Store A stockout during checkout: {e}. Attempting Federated Store B failover...[/bold yellow]")
+                return self.execute_merchant_b_purchase(agent_goal=agent_goal, session_id=session_id, logger=logger)
+            
             err_str = str(e)
             logger.log_step(
                 "PAYMENT_EXECUTION",
@@ -237,8 +352,11 @@ class BuyerAgent:
         session_id = session_id or f"sess_{uuid.uuid4().hex[:8]}"
         logger = AuditLogger(session_id=session_id)
 
-        console.print(f"\n[bold green]🤖 Starting Buyer Agent Session:[/bold green] [bold cyan]{session_id}[/bold cyan]")
-        console.print(f"[bold yellow]Goal:[/bold yellow] '{agent_goal}'")
+        try:
+            console.print(f"\n[bold green]Starting Buyer Agent Session:[/bold green] [bold cyan]{session_id}[/bold cyan]")
+            console.print(f"[bold yellow]Goal:[/bold yellow] '{agent_goal}'")
+        except Exception:
+            pass
 
         excluded_product_ids: List[str] = []
         max_retries = 2
@@ -251,6 +369,17 @@ class BuyerAgent:
                 err_msg = f"Failed to reach Merchant Catalog API: {str(e)}"
                 logger.log_step("CATALOG_SEARCH", agent_goal=agent_goal, outcome_status="FAILED", guardrail_message=err_msg)
                 return {"success": False, "status": "API_ERROR", "message": err_msg, "session_id": session_id}
+
+            # Check if Store A has 0 products or if goal specifically matches an out-of-stock item in Store A
+            raw_catalog = self.client.get_catalog(in_stock_only=False).get("products", [])
+            depleted_target = next((p for p in raw_catalog if p["stock_qty"] <= 0 and any(w in p["name"].lower() for w in agent_goal.lower().split() if len(w) > 2)), None)
+            
+            if depleted_target or not products:
+                try:
+                    console.print(f"[bold yellow]Store A Stockout Detected for '{depleted_target['name'] if depleted_target else agent_goal}'! Initiating Federated Store B Failover...[/bold yellow]")
+                except Exception:
+                    pass
+                return self.execute_merchant_b_purchase(agent_goal=agent_goal, session_id=session_id, logger=logger)
 
             logger.log_step(
                 "CATALOG_SEARCH",
@@ -279,7 +408,6 @@ class BuyerAgent:
             for item_sel in choice.items:
                 target_p = next((p for p in products if p["id"] == item_sel.product_id), None)
                 if not target_p:
-                    raw_catalog = self.client.get_catalog(in_stock_only=False).get("products", [])
                     target_p = next((p for p in raw_catalog if p["id"] == item_sel.product_id), None)
                 
                 if not target_p:
@@ -311,15 +439,12 @@ class BuyerAgent:
                     "subtotal_inr": subtotal
                 })
 
-            # Check if selection is empty or if selected products exceed budget cap
             if not cart_input_items or total_amount > self.spending_cap_inr:
                 match_p = next((p for p in products if p["id"].lower() in agent_goal.lower() or any(w.lower() in p["name"].lower() for w in agent_goal.split() if len(w) > 3)), None)
                 p_name = match_p["name"] if match_p else agent_goal
                 p_cost = match_p["price_inr"] if match_p else 0.0
 
                 rej_msg = f"Proposed amount ₹{p_cost:.2f} exceeds single action spending cap of ₹{self.spending_cap_inr:.2f}." if p_cost > 0 else f"Requested items exceed spending cap of ₹{self.spending_cap_inr:.2f}."
-
-                # If upsell proposal exists, attach to audit step & return
                 upsell_dict = choice.upsell_proposal.model_dump() if choice.upsell_proposal else None
 
                 logger.log_step(

@@ -57,25 +57,29 @@ class GatingCheckpoint:
 
         panel_content = "\n".join(panel_lines)
 
-        console.print()
-        console.print(Panel(
-            panel_content,
-            title="[bold red]🛑 GUARDRAIL CHECKPOINT — HUMAN / CODE GATING GATE[/bold red]",
-            border_style="red"
-        ))
+        try:
+            console.print()
+            console.print(Panel(
+                panel_content,
+                title="[bold red]GUARDRAIL CHECKPOINT — HUMAN / CODE GATING GATE[/bold red]",
+                border_style="red"
+            ))
+        except Exception:
+            pass
 
         if self.mode == "AUTO_APPROVE":
-            console.print("[dim][GATING GATE] Mode is AUTO_APPROVE. Automatically granting clearance for execution.[/dim]")
+            try:
+                console.print("[dim][GATING GATE] Mode is AUTO_APPROVE. Automatically granting clearance for execution.[/dim]")
+            except Exception:
+                pass
             return True
 
         # Interactive CLI Human Gate Prompt
         try:
             approved = Confirm.ask("\n[bold yellow]Execute payment transaction with Razorpay Test API?[/bold yellow]", default=True)
             if approved:
-                console.print("[bold green]✓ Clearance Granted! Proceeding to execute checkout...[/bold green]\n")
                 return True
             else:
-                console.print("[bold red]✗ Clearance Denied by User. Aborting transaction execution.[/bold red]\n")
                 return False
         except Exception:
             return True
