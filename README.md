@@ -1,107 +1,126 @@
-# 🍵 Agentic Commerce & Bounded M2M Payments
+# 🍵 Boundly: Agentic Commerce & Bounded M2M Payments
 > **Razorpay AI Buildathon — Track 01 Submission: AI Growth & Agentic Commerce**
 
-A production-grade, end-to-end implementation of an **Agent-Transactable Merchant** and an **Independent AI Buyer Agent**. Built on top of FastAPI, Gemini 3.6 Flash LLM, Razorpay Test API, and a deterministic Guardrails/Audit Layer.
+A production-grade, end-to-end implementation of an **Agent-Transactable Merchant** and an **Autonomous Buyer Agent**. Built using Next.js 14, FastAPI, Gemini 3.6 Flash LLM, Razorpay Test API, and a deterministic Code Guardrail / Human Gating Layer.
 
 ---
 
-## 📌 Problem Statement & Core Philosophy
+## 📌 Core Architecture & How Things Work
 
-Most AI commerce hackathon projects build a **chat UI for humans** (e.g. a chatbot where a user asks for product recommendations and clicks a payment link). 
+Most AI commerce hackathon projects build a simple **chat UI for humans** (e.g. a chatbot where a user asks for product recommendations and clicks a payment link). 
 
-This project proves **genuine Agentic Commerce**:
-1. **Agent-Readable Merchant API**: Exposes strict schema contracts (`GET /agent-spec`), price standards (INR), stock reservation rules, and variant metadata so external autonomous software agents can browse, filter, and transact without human UI scraping.
-2. **Independent Buyer Agent**: A standalone script with **zero internal access or database privileges**. It communicates purely via REST API calls over HTTP.
-3. **Deterministic Guardrails & Gating Layer**: Confines the LLM strictly to intent parsing and catalog reasoning. The LLM **cannot** execute money-moving calls directly. All payments require passing a code-enforced spending cap (both single-action & cumulative session spend) and a human-in-the-loop gating gate.
-4. **Transparent Order Execution & Simulation Architecture**:
-   * **Order Creation**: **100% Real** via Razorpay REST API (`POST /v1/orders` returning real `order_...` IDs).
-   * **Payment Capture & Verification**: **Locally Simulated HMAC SHA256 Signature Verification** (`verification_mode: SIMULATED_TEST_SIGNATURE`). *Note: In Razorpay's architecture, actual payment capture requires interactive hosted web/mobile UI card entry, which is out of scope for automated machine-to-machine API agents.*
-5. **Durable Audit Log**: Captures every decision step, reasoning trace, reasoning source (`GEMINI_3.6_FLASH` vs `RULE_FALLBACK`), guardrail check, and Razorpay Order ID into PostgreSQL/SQLite for 100% inspectability.
+**Boundly proves genuine Agentic Commerce:**
+1. **Agent-Readable Merchant API (`/agent-spec`)**: Exposes strict schema contracts, price standards in INR, stock reservation rules, and variant metadata so external autonomous software agents can browse, filter, and transact without human UI scraping.
+2. **Independent Autonomous Buyer Agent**: A standalone buyer agent with **zero internal access or database privileges**. It communicates purely via REST API calls over HTTP.
+3. **LLM Reasoning & Failover Engine**: Uses `gemini-3.6-flash` (with fallback to `gemini-3.5-flash` and `gemini-flash-latest`) for catalog reasoning and intent parsing. If LLM quota is exhausted, it fails over smoothly to a token-proximity NLP rule parser.
+4. **Deterministic Guardrails Layer**: Confines the LLM strictly to catalog reasoning. The LLM **cannot** execute money-moving calls directly. All payments require passing a code-enforced spending cap (both single-action & cumulative session spend) and a human-in-the-loop gating checkpoint.
+5. **Human Gating & Revenue Upsell Engine**:
+   - **Navy Gating Card**: Presents transaction itemization, unit prices, and explicit **Agent Decision Rationale** before any money moves.
+   - **Amber Revenue Upsell Card**: When a requested item or multi-unit quantity exceeds the spending cap, the agent dynamically generates **Option A** (in-budget alternative) and **Option B** (cap upgrade for requested quantity) for explicit human approval.
+6. **Real Order Creation & Signature Verification**:
+   - **Order Creation**: **100% Real** via Razorpay REST API (`POST /v1/orders` returning real `order_...` IDs).
+   - **Payment Verification**: **Locally Simulated HMAC SHA256 Signature Verification** (`verification_mode: SIMULATED_TEST_SIGNATURE`).
+7. **Durable Audit Trail**: Captures every decision step, reasoning trace, reasoning source (`GEMINI_3.6_FLASH` vs `RULE_FALLBACK`), guardrail check, and Razorpay Order ID into SQLite for 100% inspectability.
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ System Workflow & Transaction Pipeline
 
 ```mermaid
 graph TD
-    A[Natural Language Goal e.g. 'Caffeine-free tea under ₹500'] --> B[Buyer Agent Orchestrator]
-    B -->|1. GET /catalog & /agent-spec| C[Merchant API - FastAPI]
-    B -->|2. Goal + Raw Catalog JSON| D[Gemini LLM Reasoner]
-    D -->|3. Structured Choice JSON| B
-    B -->|4. Submit Proposal| E[Guardrails Engine]
-    E -->|5. Check Spending Cap & Cumulative Session Spend| F{Within Budget & Valid?}
-    F -->|No| G[Block Action & Record Audit Log]
-    F -->|Yes| H[Human / Code Gating Checkpoint]
-    H -->|Rejected| I[Halt & Record Rejection Audit Log]
-    H -->|Approved| J[Execute Checkout POST /checkout/create-order]
-    J -->|6. Order Creation Real API| K[Razorpay Test API]
-    K -->|7. HMAC Payment Signature Verification| L[Merchant Stock Decremented]
-    L -->|8. Log Complete Chain| M[(PostgreSQL / SQLite Audit Log)]
-    J -->|On Stockout Error| N[Failure Recovery: Exclude Multi-Item Failing Bundle]
+    A[Natural Language Goal e.g. 'Get me 2 packs of Masala Chai'] --> B[Next.js 14 Frontend Dashboard]
+    B -->|POST /api/agent-studio-chat| C[FastAPI Merchant Backend]
+    C -->|GET /catalog & /agent-spec| D[Merchant Catalog DB]
+    C -->|Goal + Catalog JSON| E[Gemini LLM Reasoner]
+    E -->|Structured Agent Choice| C
+    C -->|Evaluate Rules| F[Guardrail Engine]
+    F -->|Budget Breached| G[Amber Revenue Upsell Proposal Card]
+    F -->|Within Budget| H[Navy Human Gating Checkpoint Card]
+    G -->|User Chooses Option B| I[Upgrade Cap & Execute Order]
+    H -->|User Approves| I
+    I -->|POST /checkout/create-order| J[Razorpay REST API]
+    J -->|HMAC SHA256 Payment Verification| K[Merchant Stock Decremented]
+    K -->|Log Execution Step| L[(SQLite Audit Trail DB)]
 ```
 
 ---
 
-## 📁 Repository Structure
+## 🎬 Detailed Walkthrough of the 4 Hackathon Scenarios
 
-```
-Track1/
-├── merchant_api/           # Merchant REST API (FastAPI)
-│   ├── app.py              # Server endpoints (/catalog, /cart, /checkout, /agent-spec)
-│   ├── catalog.py          # Seed catalog ("Aura Artisan Teas & Botanicals")
-│   ├── models.py           # Pydantic request/response schemas
-│   └── razorpay_client.py  # Razorpay SDK integration for test orders & payment signatures
-├── guardrails/             # Security Circuit-Breaker & Gating Layer
-│   ├── engine.py           # Single-action & cumulative session spend validator
-│   ├── gating.py           # Human-in-the-loop approval checkpoint & inventory warnings
-│   └── audit.py            # Durable Audit Logger (SQLAlchemy DB models)
-├── buyer_agent/            # Autonomous Buyer Agent
-│   ├── agent.py            # Buyer agent core orchestrator & session spend tracking
-│   ├── llm_reasoner.py     # Gemini 3.6 Flash LLM & Token-Proximity NLP parser
-│   └── client.py           # Independent HTTP client for Merchant API
-├── tests/                  # Automated integration test suite
-│   ├── test_happy_path.py  # End-to-end successful purchase test
-│   ├── test_guardrails.py # Spending cap breach rejection test
-│   └── test_stockout.py    # Mid-checkout stockout recovery test
-├── run_demo.py             # Rich CLI Interactive Demo Runner
-├── app_streamlit.py        # Streamlit Web UI Dashboard
-├── requirements.txt        # Python package dependencies
-└── README.md               # Architecture documentation & pitch talking points
-```
+### 🍵 Scenario 1: Sleep Tea Purchase (Under ₹500 Cap)
+* **Goal:** `"I need a soothing herbal tea to help me sleep under ₹500"`
+* **Initial Cap:** ₹500.00
+* **How It Works:**
+  1. The LLM evaluates the catalog and identifies `Himalayan Chamomile Lavender Infusion` (₹380.00, caffeine-free).
+  2. The Guardrail Engine validates that ₹380.00 <= ₹500.00 cap.
+  3. The UI renders the **Navy Gating Checkpoint Card** displaying the item, unit price, and an **Agent Decision Rationale** box explaining why this tea was selected.
+  4. Upon human approval (`Approve & Pay ₹380.00`), the agent calls Razorpay `/checkout/create-order`, verifies the payment signature, decrements merchant stock, and displays a green Razorpay receipt card.
 
----
+### 🍵 Scenario 2: Ceremonial Japanese Matcha Revenue Upsell (Cap Breach)
+* **Goal:** `"Get me Ceremonial Japanese Matcha"`
+* **Initial Cap:** ₹500.00
+* **How It Works:**
+  1. The LLM matches `Ceremonial Japanese Matcha` (Price: ₹950.00).
+  2. The Guardrail Engine detects that ₹950.00 breaches the ₹500.00 spending cap.
+  3. Rather than dropping the request or failing silently, the **Revenue Upsell Engine** dynamically generates an **Amber Revenue Upsell Card**:
+     - **Option A (In-Budget Swap):** `1x Himalayan Chamomile Lavender Infusion` (₹380.00).
+     - **Option B (Cap Upgrade):** Upgrade spending cap to **₹1000.00** to unlock `Ceremonial Japanese Matcha` (₹950.00).
+  4. Clicking **Option B** upgrades the cap to ₹1000.00, executes the Matcha purchase, and returns a verified Razorpay receipt.
 
-## 🔒 How Guardrails & Gating Work
+### 🍵 Scenario 3: Multi-Item Bundle Purchase (Under ₹1,500 Cap)
+* **Goal:** `"I want to buy 1 Kashmir Kahwa and 1 Imperial Darjeeling First Flush"`
+* **Initial Cap:** ₹1,500.00
+* **How It Works:**
+  1. The LLM parses the multi-product goal and selects:
+     - `1x Kashmir Kahwa Saffron Blend` (₹420.00)
+     - `1x Imperial Darjeeling First Flush` (₹650.00)
+  2. Subtotal calculation: ₹420.00 + ₹650.00 = **₹1,070.00**.
+  3. The Guardrail Engine validates that ₹1,070.00 <= ₹1,500.00 cap.
+  4. The **Navy Gating Checkpoint Card** displays an itemized subtotal breakdown for both items.
+  5. Upon approval, both items are reserved and checked out in a single Razorpay order.
 
-1. **Spending Cap Enforcer (`guardrails/engine.py`)**:
-   - Enforces single-action budget caps AND tracks cumulative session spending (`session_spent_inr`).
-   - If an LLM recommends an item exceeding budget or breaching cumulative session caps, the Guardrail Engine instantly blocks execution with `BLOCKED_GUARDRAIL`.
-2. **Human-in-the-Loop Gating Checkpoint (`guardrails/gating.py`)**:
-   - Intercepts all authorized purchase proposals before any Razorpay API calls are made.
-   - Displays a review panel showing product name, category, origin, flavor notes, price, variant, LLM reasoning, and inventory stock warnings.
-   - Prompts for explicit approval (`[y/n]` in CLI mode or visual buttons in Web UI).
-3. **Durable Audit Trail (`guardrails/audit.py`)**:
-   - Stores every transaction step in `agentic_commerce.db` (or PostgreSQL).
-   - Logged fields: `session_id`, `step_type`, `agent_goal`, `llm_reasoning`, `reasoning_source`, `spending_cap_inr`, `proposed_amount_inr`, `guardrail_passed`, `gate_status`, `razorpay_order_id`, `outcome_status`.
-
----
-
-## ⚡ Failure Handling & Resiliency
-
-1. **Multi-Item Stockout Recovery**:
-   - If a product sells out between catalog browsing and checkout, the Merchant API returns `409 STOCKOUT_ERROR`.
-   - The Buyer Agent catches the error, logs `STOCKOUT_RECOVERED`, excludes all products in the failing cart bundle, queries the catalog again for the next best matching item under budget, and completes checkout gracefully.
-2. **No Silent Fallback Policy**:
-   - Every reasoning decision explicitly logs its engine (`GEMINI_3.6_FLASH` vs `RULE_FALLBACK`).
-   - Payment signatures explicitly record verification mode (`SIMULATED_TEST_SIGNATURE`).
+### 🍵 Scenario 4: Federated Store B Cross-Store Failover Recovery
+* **Trigger:** Store A experiences a complete stockout of Kashmir Kahwa (`tea-001` stock = 0).
+* **Goal:** `"Get me Kashmir Kahwa Saffron Blend"`
+* **Initial Cap:** ₹500.00
+* **How It Works:**
+  1. The agent attempts to source Kahwa from Store A, but detects 0 units in stock.
+  2. Instead of failing the user request, the agent initiates **Federated Cross-Store Failover**:
+     - Queries Federated Partner Store B (*Botanical Leaf Co.*).
+     - Discovers `Pashmina Kashmiri Kahwa (Whole Spices)` for ₹450.00.
+  3. The UI renders a **Purple Federated Failover Card** highlighting the automatic cross-store discovery.
+  4. Upon approval, the transaction executes against Store B's API, verifying the cross-store order and decremented stock.
 
 ---
 
-## 🚀 Quickstart & Running the Demo
+## 📸 Screenshots & Visual UI Components
 
-### 1. Install Dependencies
+> **Tip:** You can capture screenshots from your browser at [`http://localhost:3000`](http://localhost:3000) and place them in an `assets/` folder in your repository.
+
+| UI Component | Description | Screenshot Placeholder |
+| :--- | :--- | :---: |
+| **Agent Studio Dashboard** | Main chat interface with live reasoning traces & kill switch banner | `![Agent Studio](assets/dashboard.png)` |
+| **Navy Gating Checkpoint Card** | Human-in-the-loop review card with Agent Rationale box | `![Gating Card](assets/gating_card.png)` |
+| **Amber Revenue Upsell Card** | Option A (In-Budget) vs Option B (Cap Upgrade) breach proposal | `![Upsell Card](assets/upsell_card.png)` |
+| **Federated Store B Failover Card** | Cross-store stockout discovery & failover card | `![Failover Card](assets/failover_card.png)` |
+| **Audit Trail Table** | Full SQL audit table displaying decision steps & Razorpay order IDs | `![Audit Trail](assets/audit_trail.png)` |
+
+---
+
+## ⚡ Failure Handling & Security Resiliency
+
+1. **Deterministic Spending Cap Enforcer:** Python code evaluates $\text{Amount} \le \text{Cap}$. The LLM cannot override this rule.
+2. **Emergency Kill Switch:** Clicking the Kill Switch banner sets `AGENT_SYSTEM_HALTED = True`, freezing all autonomous transactions mid-flight.
+3. **No Silent Fallbacks:** Every reasoning step explicitly logs whether it ran on `GEMINI_3.6_FLASH` or `RULE_FALLBACK`.
+
+---
+
+## 🚀 Quickstart & Running the Project
+
+### 1. Install Python & Node Dependencies
 ```bash
 pip install -r requirements.txt
+cd frontend && npm install && cd ..
 ```
 
 ### 2. Configure Environment Variables
@@ -110,38 +129,27 @@ Copy `.env.example` to `.env`:
 GEMINI_API_KEY=your_gemini_api_key
 RAZORPAY_KEY_ID=rzp_test_your_key_id
 RAZORPAY_KEY_SECRET=your_key_secret
-DATABASE_URL=sqlite:///./agentic_commerce.db
-SPENDING_CAP_INR=2000.0
-GATING_MODE=CLI
+SPENDING_CAP_INR=500.0
 ```
 
-### 3. Launch Web Dashboard UI
+### 3. Launch Both Application Servers
 ```bash
-python -m uvicorn merchant_api.app:app --reload
+python start_app.py
 ```
-Navigate to `http://127.0.0.1:8000/` for the bespoke Web UI.
+- **FastAPI Merchant Backend:** [`http://127.0.0.1:8000`](http://127.0.0.1:8000)
+- **Next.js Dashboard UI:** [`http://localhost:3000`](http://localhost:3000)
 
-### 4. Launch Interactive CLI Demo
+### 4. Run Automated Scenario Test Suite
 ```bash
-python run_demo.py
-```
-
-### 5. Run Automated Test Suite
-```bash
-python -m pytest tests/
+python scratch/test_all_scenarios.py
 ```
 
 ---
 
-## 📽️ Pitch Video Talking Points (5-Minute Video Script)
+## 📽️ Pitch Video Script & Talking Points (5-Minute Video)
 
-1. **The Vision (0:00 - 1:00)**:
-   - *"Most AI commerce projects build a chatbot for humans. We built a machine-transactable merchant and an independent AI agent that can buy products safely without human intervention."*
-2. **Agent-Readable API (`/agent-spec`) (1:00 - 2:00)**:
-   - *"Our merchant API exposes `/agent-spec` which tells autonomous agents currency standards (INR), pricing units, stock reservation limits, and required security gates."*
-3. **The Differentiator: Guardrails & Gating (2:00 - 3:15)**:
-   - *"LLMs are great at reasoning, but terrible at holding financial state. We strictly confine the Gemini LLM to intent parsing. The actual payment call can ONLY happen if code-level spending caps pass and explicit clearance is granted at our Gating Checkpoint."*
-4. **Honest Architecture: Order API vs Payment Simulation (3:15 - 4:00)**:
-   - *"Order creation is 100% real via Razorpay's REST API (`/orders`). Payment capture & signature verification is locally simulated with HMAC SHA256 since full checkout requires Razorpay's hosted checkout UI, which is out of scope for autonomous M2M API agents."*
-5. **No Silent Fallback & Audit Trail (4:00 - 5:00)**:
-   - *"We audit every failure path in our system so no call can silently masquerade as success. Every step logs its exact reasoning engine (`GEMINI_3.6_FLASH`) and verification mode in our durable SQL audit log."*
+1. **The Vision (0:00 - 1:00):** *"Most hackathons build chatbots for humans. Boundly builds machine-transactable merchants and autonomous agents that transact safely without human scraping."*
+2. **Agent Specification (`/agent-spec`) (1:00 - 2:00):** *"Our merchant API exposes `/agent-spec`, detailing INR pricing standards, stock locking rules, and security clearance gates."*
+3. **Guardrails & Revenue Upsells (2:00 - 3:30):** *"Code-level guardrails strictly enforce budget caps. When a user asks for 2 packs exceeding their cap, our Amber Upsell Engine presents human-in-the-loop choices to swap or upgrade."*
+4. **Federated Store B Failover (3:30 - 4:15):** *"When Store A runs out of stock mid-checkout, the agent automatically discovers in-stock inventory at partner Store B (Botanical Leaf Co.) and completes the order."*
+5. **Order API vs Signature Simulation (4:15 - 5:00):** *"Order creation uses Razorpay's real REST API (`/v1/orders`). Signature verification is locally simulated using HMAC SHA256. We audit every path in our system so no call can silently masquerade as success. Every step logs its exact reasoning engine (`GEMINI_3.6_FLASH`) and verification mode in our durable SQL audit log."*
