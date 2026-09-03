@@ -407,6 +407,15 @@ def verify_payment(payload: PaymentVerificationInput):
 def halt_agent_system():
     global AGENT_SYSTEM_HALTED
     AGENT_SYSTEM_HALTED = True
+    logger = AuditLogger(session_id=f"sess_halt_{uuid.uuid4().hex[:8]}")
+    logger.log_step(
+        "EMERGENCY_KILL_SWITCH",
+        proposed_action="Merchant Emergency Kill Switch Toggled ON",
+        guardrail_passed=False,
+        guardrail_message="EMERGENCY KILL SWITCH ACTIVATED: All autonomous agent purchases and cart reservations frozen.",
+        gate_status="FROZEN",
+        outcome_status="EMERGENCY_BLOCKED"
+    )
     return {
         "success": True,
         "status": "EMERGENCY_HALTED",
@@ -418,6 +427,15 @@ def halt_agent_system():
 def resume_agent_system():
     global AGENT_SYSTEM_HALTED
     AGENT_SYSTEM_HALTED = False
+    logger = AuditLogger(session_id=f"sess_res_{uuid.uuid4().hex[:8]}")
+    logger.log_step(
+        "EMERGENCY_KILL_SWITCH",
+        proposed_action="Merchant Kill Switch Resumed Normal Operations",
+        guardrail_passed=True,
+        guardrail_message="System unpaused by merchant operator.",
+        gate_status="ACTIVE",
+        outcome_status="SYSTEM_RESUMED"
+    )
     return {
         "success": True,
         "status": "ACTIVE",
@@ -495,6 +513,15 @@ class ConfirmGatingInput(BaseModel):
 @app.post("/api/confirm-gating", tags=["Dashboard API"])
 def confirm_gating_api(payload: ConfirmGatingInput):
     if AGENT_SYSTEM_HALTED:
+        logger = AuditLogger(session_id=payload.session_id)
+        logger.log_step(
+            "GUARDRAIL_EVALUATION",
+            proposed_action="Approval Attempt while Kill Switch Active",
+            guardrail_passed=False,
+            guardrail_message="EMERGENCY HALT ACTIVATED: Merchant kill switch has frozen all autonomous agent purchases.",
+            gate_status="FROZEN",
+            outcome_status="EMERGENCY_BLOCKED"
+        )
         return {
             "success": False,
             "status": "EMERGENCY_SYSTEM_HALT",
@@ -644,6 +671,24 @@ def agent_studio_chat_api(payload: AgentStudioChatInput):
 
         if (choice.upsell_proposal and choice.upsell_proposal.budget_breached) or not eval_res.passed or not choice.items:
             if choice.upsell_proposal and choice.upsell_proposal.budget_breached:
+                if payload.gating_mode == "Auto Approve":
+                    logger = AuditLogger(session_id=f"sess_guard_{uuid.uuid4().hex[:8]}")
+                    logger.log_step(
+                        "GUARDRAIL_EVALUATION",
+                        agent_goal=payload.message,
+                        proposed_action=f"Requested Product: {choice.upsell_proposal.breached_product_name}",
+                        llm_reasoning=choice.reasoning,
+                        spending_cap_inr=payload.spending_cap_inr,
+                        proposed_amount_inr=choice.upsell_proposal.breached_product_price_inr,
+                        guardrail_passed=False,
+                        guardrail_message=f"Cart price ₹{choice.upsell_proposal.breached_product_price_inr:.2f} exceeds single action spending cap ₹{payload.spending_cap_inr:.2f}.",
+                        gate_status="N/A",
+                        outcome_status="BLOCKED_GUARDRAIL"
+                    )
+                    return {
+                        "type": "error",
+                        "message": f"⛔ Guardrail Blocked: '{choice.upsell_proposal.breached_product_name}' (₹{choice.upsell_proposal.breached_product_price_inr:.2f}) exceeds your single-action spending cap of ₹{payload.spending_cap_inr:.2f}. Autonomous transaction refused."
+                    }
                 return {
                     "type": "upsell",
                     "message": f"GUARDRAIL SPENDING CAP BREACHED: Proposed amount exceeds your ₹{payload.spending_cap_inr:.2f} single action cap.",
@@ -718,6 +763,20 @@ def execute_upsell_api(payload: UpsellExecuteInput):
 
     up = payload.upsell_data
     if payload.option == "C":
+        logger = AuditLogger(session_id=f"sess_up_{uuid.uuid4().hex[:8]}")
+        p_name = up.get("breached_product_name", "Requested item")
+        p_price = float(up.get("breached_product_price_inr", 0.0))
+        logger.log_step(
+            "USER_GATING",
+            agent_goal=payload.user_prompt,
+            proposed_action=f"Upsell rejected for {p_name}",
+            spending_cap_inr=500.0,
+            proposed_amount_inr=p_price,
+            guardrail_passed=False,
+            guardrail_message=f"Cart price ₹{p_price:.2f} exceeded cap. User explicitly declined both alternative and cap upgrade.",
+            gate_status="ABORTED",
+            outcome_status="USER_DECLINED"
+        )
         return {
             "success": False,
             "status": "ABORTED",
@@ -758,21 +817,6 @@ def execute_upsell_api(payload: UpsellExecuteInput):
         agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=new_cap, gating_mode="AUTO_APPROVE")
         res = agent.execute_preapproved_choice(choice=up_choice, agent_goal=payload.user_prompt)
         return {"success": True, "result": res, "new_cap": new_cap}
-
-    if payload.option == "C":
-        logger = AuditLogger(session_id=f"sess_up_{uuid.uuid4().hex[:8]}")
-        logger.log_step(
-            "USER_GATING",
-            agent_goal=payload.user_prompt,
-            proposed_action=f"Upsell rejected for {up.get('breached_product_name')}",
-            spending_cap_inr=500.0,
-            proposed_amount_inr=up.get("breached_product_price_inr"),
-            guardrail_passed=False,
-            guardrail_message=f"Cart price ₹{up.get('breached_product_price_inr')} exceeded cap. User declined both alternative and cap upgrade.",
-            gate_status="ABORTED",
-            outcome_status="USER_DECLINED"
-        )
-        return {"success": False, "status": "USER_DECLINED", "message": "User declined upsell proposal."}
 
     return {"success": False, "message": "Unknown option"}
 
