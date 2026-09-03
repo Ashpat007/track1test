@@ -5,6 +5,38 @@ A production-grade, end-to-end implementation of an **Agent-Transactable Merchan
 
 ---
 
+## 🎯 Project Objectives & What It Solves
+
+### The Core Problem:
+Autonomous AI agents are being given access to real bank cards and payment rails, but they are fundamentally **unbounded**:
+1. **Financial Runaway:** LLMs hallucinate prices, miscalculate quantities, and can be prompt-injected into overspending.
+2. **Fragile Commerce:** Agents crash or give up when an item is out of stock.
+3. **Zero Oversight:** Transactions happen with no cryptographic paper trail or emergency stop mechanisms.
+
+### What Boundly Solves:
+Boundly bridges the trust gap between Generative AI and real Fintech. It transforms an unpredictable AI chatbot into a **bounded, compliant, production-grade autonomous buyer** that consumers and merchants can safely trust with real financial infrastructure (Razorpay):
+* **Deterministic Guardrails:** Mathematical code-level spending caps (single-action & cumulative session limits) that LLM hallucinations cannot bypass.
+* **Human-in-the-Loop Gating:** Explicit cryptographic human approval checkpoints before any real money moves.
+* **Autonomous Resilience:** Recovers from stockouts via federated cross-merchant failover and smart revenue upsell proposals instead of crashing.
+* **Durable Non-Repudiation:** An immutable SQL audit trail and an instant emergency kill switch to freeze rogue agents.
+
+---
+
+## 🎨 System Color Palette & Design Language
+
+Boundly uses a high-contrast, functional design language where colors communicate distinct transactional and safety states across both Light and Dark themes:
+
+| Color Accent | Hex / Variable | UI Component | Functional Role |
+| :--- | :---: | :--- | :--- |
+| **Electric Navy** | `#0000A3` / `#1D4ED8` | **Human Gating Card** | The primary review checkpoint. Represents authorization and formal purchase approval. |
+| **Warm Amber** | `#F59E0B` / `#D97706` | **Revenue Upsell Card** | Guardrail cap breach notification. Presents in-budget alternatives (Option A) and cap upgrades (Option B). |
+| **Signal Coral Red** | `#E24B4A` / `#EF4444` | **Emergency Kill Switch** | Circuit-breaker toggle and active FROZEN banner. Denotes halted autonomous operations and rejected orders. |
+| **Emerald Green** | `#10B981` / `#059669` | **Payment Receipt & Spec** | Verified Razorpay test payment confirmations, in-stock badges, and the `/agent-spec` endpoint viewer. |
+| **Cyan Blue** | `#00BAF2` / `#0284C7` | **Federated Failover Card** | Cross-merchant partner discovery. Highlights Store A ➔ Store B automatic rerouting. |
+| **Obsidian Dark** | `#0B0F17` / `#111827` | **Studio Background** | Focused, high-contrast dark theme optimized for live reasoning traces and audit monitoring. |
+
+---
+
 ## 📌 Core Architecture & How Things Work
 
 Most AI commerce hackathon projects build a simple **chat UI for humans** (e.g. a chatbot where a user asks for product recommendations and clicks a payment link). 
@@ -143,13 +175,3 @@ python start_app.py
 ```bash
 python scratch/test_all_scenarios.py
 ```
-
----
-
-## 📽️ Pitch Video Script & Talking Points (5-Minute Video)
-
-1. **The Vision (0:00 - 1:00):** *"Most hackathons build chatbots for humans. Boundly builds machine-transactable merchants and autonomous agents that transact safely without human scraping."*
-2. **Agent Specification (`/agent-spec`) (1:00 - 2:00):** *"Our merchant API exposes `/agent-spec`, detailing INR pricing standards, stock locking rules, and security clearance gates."*
-3. **Guardrails & Revenue Upsells (2:00 - 3:30):** *"Code-level guardrails strictly enforce budget caps. When a user asks for 2 packs exceeding their cap, our Amber Upsell Engine presents human-in-the-loop choices to swap or upgrade."*
-4. **Federated Store B Failover (3:30 - 4:15):** *"When Store A runs out of stock mid-checkout, the agent automatically discovers in-stock inventory at partner Store B (Botanical Leaf Co.) and completes the order."*
-5. **Order API vs Signature Simulation (4:15 - 5:00):** *"Order creation uses Razorpay's real REST API (`/v1/orders`). Signature verification is locally simulated using HMAC SHA256. We audit every path in our system so no call can silently masquerade as success. Every step logs its exact reasoning engine (`GEMINI_3.6_FLASH`) and verification mode in our durable SQL audit log."*
