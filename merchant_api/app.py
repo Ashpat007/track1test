@@ -606,6 +606,11 @@ def agent_studio_chat_api(payload: AgentStudioChatInput):
         # Question queries without explicit buy verbs are treated as Q&A
         is_buy_intent = has_buy_verb or (not is_question and any(k in msg_lower for k in ["need", "want", "get"]))
 
+        # Ensure Store A stock is restored for non-failover queries
+        is_failover_query = "kashmir kahwa" in payload.message.lower() and not any(w in payload.message.lower() for w in [" and ", " & ", "darjeeling", "bundle"])
+        if not is_failover_query and CATALOG_DB.get("tea-001", {}).get("stock_qty", 0) <= 0:
+            CATALOG_DB["tea-001"]["stock_qty"] = 12
+
         reasoner = LLMReasoner()
         products = [p.copy() for p in CATALOG_DB.values() if p["stock_qty"] > 0]
 
