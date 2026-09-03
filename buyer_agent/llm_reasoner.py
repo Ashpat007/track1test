@@ -8,6 +8,7 @@ import os
 import json
 import re
 from typing import Dict, Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
@@ -16,6 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+_REASONER_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 class AgentItemSelection(BaseModel):
@@ -166,18 +169,41 @@ INSTRUCTIONS:
   "stock_warnings": ["string"]
 }}
 """
-            for target_model in models_to_try:
-                try:
-                    response = self.client.models.generate_content(
-                        model=target_model,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json"
+            def _invoke_gemini():
+                for target_model in models_to_try:
+                    try:
+                        resp = self.client.models.generate_content(
+                            model=target_model,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json"
+                            )
                         )
-                    )
+                        return (resp, target_model)
+                    except Exception as e:
+                        err_str = str(e)
+                        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                            LLMReasoner._exhausted_models.add(target_model)
+                            print(f"[LLMReasoner Notice] {target_model} rate limited (429). Switching...")
+                            continue
+                        else:
+                            print(f"[LLMReasoner Notice] {target_model} exception: {e}.")
+                            break
+                return None
+
+            res_tuple = None
+            try:
+                fut = _REASONER_EXECUTOR.submit(_invoke_gemini)
+                res_tuple = fut.result(timeout=2.5)
+            except Exception as te:
+                print(f"[LLMReasoner Fast-Failover] Gemini call exceeded 2.5s or failed ({te}). Instantly using zero-latency local NLP engine.")
+                res_tuple = None
+
+            if res_tuple and res_tuple[0]:
+                response, target_model = res_tuple
+                try:
                     raw_text = response.text.strip()
                     data = json.loads(raw_text)
-                    
                     items = [AgentItemSelection(**i) for i in data.get("items", [])]
                     warnings = data.get("stock_warnings", [])
                     reasoning_text = data.get("reasoning", "Gemini catalog reasoning completed.")
@@ -187,8 +213,6 @@ INSTRUCTIONS:
                         reasoning_text = f"⚠️ [STOCKOUT RECOVERED]: Primary item '{excluded_names_str}' hit 0 stock. Recovered by selecting in-stock alternative: {reasoning_text}"
 
                     engine_tag = "GEMINI_3.6_FLASH"
-                    
-                    # Check if requested product or total requested quantity exceeds spending cap
                     matched_p = next((p for p in available_catalog if p["id"].lower() in agent_goal.lower() or any(w.lower() in p["name"].lower() for w in agent_goal.split() if len(w) > 3)), None)
                     upsell_prop = None
                     if matched_p:
@@ -210,15 +234,8 @@ INSTRUCTIONS:
                         stock_warnings=warnings,
                         upsell_proposal=upsell_prop
                     )
-                except Exception as e:
-                    err_str = str(e)
-                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                        LLMReasoner._exhausted_models.add(target_model)
-                        print(f"[LLMReasoner Notice] {target_model} rate limited (429). Instantly switching model...")
-                        continue
-                    else:
-                        print(f"[LLMReasoner Notice] {target_model} exception: {e}.")
-                        break
+                except Exception as parse_err:
+                    print(f"[LLMReasoner Parse Error] {parse_err}. Using local NLP engine.")
 
             return self._token_proximity_nlp_parser(agent_goal, available_catalog, spending_cap_inr, exclude_ids, catalog_products)
         else:
