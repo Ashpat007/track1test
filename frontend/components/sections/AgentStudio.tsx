@@ -310,7 +310,8 @@ export default function AgentStudio({
           Scenarios:
         </span>
         <button
-          onClick={() => {
+          onClick={async () => {
+            try { await resetCatalog(); } catch {}
             setSpendingCap(500);
             handleSendPrompt("Get a caffeine-free herbal tea for sleep under ₹500", 500);
           }}
@@ -320,7 +321,8 @@ export default function AgentStudio({
           1. Sleep tea (₹380)
         </button>
         <button
-          onClick={() => {
+          onClick={async () => {
+            try { await resetCatalog(); } catch {}
             setSpendingCap(500);
             handleSendPrompt("Buy Japanese Ceremonial Matcha Grade-A", 500);
           }}
@@ -330,7 +332,8 @@ export default function AgentStudio({
           2. Matcha Upsell (₹950 vs ₹500 cap)
         </button>
         <button
-          onClick={() => {
+          onClick={async () => {
+            try { await resetCatalog(); } catch {}
             setSpendingCap(1500);
             handleSendPrompt("Buy 1 Kahwa and 1 Darjeeling", 1500);
           }}

@@ -621,9 +621,10 @@ def agent_studio_chat_api(payload: AgentStudioChatInput):
                 "content": explanation
             }
 
-        # Check for Federated Failover if requested product is out of stock in Store A
+        # Check for Federated Failover if single requested product is out of stock in Store A
+        is_multi_item_prompt = any(w in payload.message.lower() for w in [" and ", " & ", "bundle", "both"])
         depleted_item = next((p for p in CATALOG_DB.values() if p["stock_qty"] <= 0 and any(w in p["name"].lower() for w in payload.message.lower().split() if len(w) > 3)), None)
-        if depleted_item:
+        if depleted_item and not is_multi_item_prompt:
             store_b_match = next((p for p in STORE_B_CATALOG_DB.values() if p["stock_qty"] > 0 and any(w in p["name"].lower() or any(w in t for t in p.get("tags", [])) for w in payload.message.lower().split() if len(w) > 3)), None)
             if store_b_match:
                 session_id = f"sess_{uuid.uuid4().hex[:8]}"
@@ -633,6 +634,8 @@ def agent_studio_chat_api(payload: AgentStudioChatInput):
                     "spending_cap_inr": payload.spending_cap_inr,
                     "store_b_product": store_b_match,
                     "store_a_depleted": depleted_item,
+                    "summary_names": f"1x {store_b_match['name']} [Federated Store B]",
+                    "total_amount_inr": store_b_match["price_inr"],
                     "is_federated": True
                 }
                 return {
