@@ -30,29 +30,29 @@ export default function UpsellCard({
   const newCap = upsellData.suggested_cap_increase_inr || 1050;
 
   return (
-    <div className="bg-[#11131c] border border-amber-500/30 rounded-2xl p-5 my-4 space-y-4 shadow-xl">
+    <div className="bg-[var(--bg-card)] border border-[var(--amber-border)] rounded-2xl p-5 my-4 space-y-4 shadow-[var(--card-shadow)] transition-colors">
       {/* Top Header Row with Amber Accent Token */}
-      <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs tracking-wide uppercase">
+      <div className="flex items-center gap-2 text-[var(--amber-text)] font-semibold text-xs tracking-wide uppercase">
         <span className="text-base leading-none">🛍️</span>
         <span>{breachedName.toUpperCase()} EXCEEDS ₹{spendingCap.toFixed(0)} CAP — AGENT SUGGESTS</span>
       </div>
 
       {/* Explanation text */}
-      <p className="text-xs text-[#d4d4d8] leading-relaxed">
+      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
         {upsellData.recommendation_reasoning ||
           `The requested item exceeds your current ₹${spendingCap.toFixed(0)} single-action cap. Here is the agent's recommended in-budget alternative:`}
       </p>
 
       {/* PROMINENT HERO CARD: Recommended in-budget alternative pulled forward */}
-      <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-[var(--amber-bg)] border border-[var(--amber-border)] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-1">
-          <div className="inline-block bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider mb-1">
+          <div className="inline-block bg-[var(--amber-border)] text-[var(--amber-text)] text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider mb-1">
             Recommended in-budget swap
           </div>
-          <div className="text-sm font-semibold text-white">{altName}</div>
-          <div className="text-xs text-amber-400 font-medium font-mono">
+          <div className="text-sm font-semibold text-[var(--text-primary)]">{altName}</div>
+          <div className="text-xs text-[var(--amber-text)] font-medium font-mono">
             ₹{altPrice.toFixed(2)}{" "}
-            <span className="text-[#a1a1aa] font-normal">(under your ₹{spendingCap.toFixed(0)} cap)</span>
+            <span className="text-[var(--text-muted)] font-normal">(under your ₹{spendingCap.toFixed(0)} cap)</span>
           </div>
         </div>
 
@@ -66,20 +66,20 @@ export default function UpsellCard({
       </div>
 
       {/* SECONDARY LOWER-EMPHASIS OPTIONS */}
-      <div className="pt-2 border-t border-[#1e2230] flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs">
+      <div className="pt-2 border-t border-[var(--border-color)] flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs">
         <button
           onClick={() => onSelectOption("B")}
           disabled={isLoading}
-          className="flex-1 bg-transparent hover:bg-[#1c1c2e] border border-[#2a2e42] hover:border-[#3b3f58] text-[#a1a1aa] hover:text-white px-3 py-2 rounded-lg transition text-left sm:text-center text-[11px] disabled:opacity-50 flex items-center justify-between sm:justify-center gap-2"
+          className="flex-1 bg-[var(--bg-pill)] hover:bg-[var(--bg-pill-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-lg transition text-left sm:text-center text-[11px] disabled:opacity-50 flex items-center justify-between sm:justify-center gap-2"
         >
           <span>Upgrade cap to ₹{newCap.toFixed(0)} & buy {breachedName}</span>
-          <span className="text-emerald-400 font-mono text-[10px]">↗</span>
+          <span className="text-[var(--success-text)] font-mono text-[10px]">↗</span>
         </button>
 
         <button
           onClick={() => onSelectOption("C")}
           disabled={isLoading}
-          className="bg-transparent hover:bg-red-500/10 border border-[#2a2e42] hover:border-red-500/30 text-[#a1a1aa] hover:text-red-400 px-3 py-2 rounded-lg transition text-center text-[11px] disabled:opacity-50 whitespace-nowrap"
+          className="bg-[var(--danger-bg)] hover:opacity-80 border border-[var(--danger-border)] text-[var(--danger-text)] px-3 py-2 rounded-lg transition text-center text-[11px] disabled:opacity-50 whitespace-nowrap font-medium"
         >
           Decline / Abort
         </button>

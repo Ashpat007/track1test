@@ -23,7 +23,7 @@ export default function Docs() {
             <li><strong>Signature Verification & Decrement</strong>: <code>POST /checkout/verify-payment</code> verifies HMAC SHA256 signature and decrements catalog stock.</li>
             <li><strong>Durable SQL Audit Trail</strong>: Every step, decision, and payment receipt is logged to SQLite.</li>
           </ol>
-          <div className="bg-[#0c0c14] border border-[#1e2230] p-3 rounded-lg font-mono text-[11px] text-[#00baf2]">
+          <div className="bg-[var(--code-bg)] border border-[var(--border-color)] p-3 rounded-lg font-mono text-[11px] text-[#00baf2] shadow-[var(--card-shadow)]">
             [User Goal] ➔ [Catalog Search] ➔ [LLM Reasoning] ➔ [Guardrail Check] ➔ [Gating Clearance] ➔ [Razorpay Payment] ➔ [SQL Audit Log]
           </div>
         </div>
@@ -133,10 +133,10 @@ export default function Docs() {
   return (
     <div className="space-y-4 max-w-[1000px]">
       <div>
-        <h2 className="text-lg font-semibold text-white">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           System Architecture & Technical Specifications
         </h2>
-        <p className="text-xs text-[#64748b]">
+        <p className="text-xs text-[var(--text-secondary)]">
           Comprehensive end-to-end reference guide for judges and technical evaluation.
         </p>
       </div>
@@ -146,15 +146,15 @@ export default function Docs() {
           <details
             key={idx}
             open={sec.defaultOpen}
-            className="group bg-[#11131c] border border-[#1e2230] rounded-xl overflow-hidden"
+            className="group bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl overflow-hidden shadow-[var(--card-shadow)] transition-colors"
           >
-            <summary className="px-4 py-3 cursor-pointer text-xs font-semibold text-white hover:text-blue-400 transition flex items-center justify-between select-none">
+            <summary className="px-4 py-3 cursor-pointer text-xs font-semibold text-[var(--text-primary)] hover:text-blue-500 transition flex items-center justify-between select-none">
               <span>{sec.title}</span>
-              <span className="text-[#64748b] group-open:rotate-180 transition-transform text-[10px]">
+              <span className="text-[var(--text-muted)] group-open:rotate-180 transition-transform text-[10px]">
                 ▼
               </span>
             </summary>
-            <div className="px-4 pb-4 pt-1 border-t border-[#1e2230]/50">{sec.content}</div>
+            <div className="px-4 pb-4 pt-1 border-t border-[var(--border-color)]/60 text-[var(--text-secondary)]">{sec.content}</div>
           </details>
         ))}
       </div>

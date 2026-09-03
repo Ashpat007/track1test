@@ -33,7 +33,7 @@ export default function GatingCard({
   const hasMultipleItems = itemsDetail && itemsDetail.length > 1;
 
   return (
-    <div className="bg-[#0000D6] border border-[#1a1aff] rounded-2xl p-6 shadow-2xl text-white my-4 transition-all">
+    <div className="bg-[#0000A3] border border-[#1a1aff] rounded-2xl p-6 shadow-[var(--gating-shadow)] text-white my-4 transition-all">
       <div className="text-xs font-normal text-white/80 mb-3">
         {hasMultipleItems ? "Gating checkpoint · bundle" : "Gating checkpoint"}
       </div>
@@ -76,7 +76,7 @@ export default function GatingCard({
         <button
           onClick={onApprove}
           disabled={isLoading}
-          className="flex-1 bg-white text-[#0000D6] font-semibold text-sm py-2.5 px-6 rounded-lg hover:bg-slate-100 transition shadow-md disabled:opacity-50 text-center"
+          className="flex-1 bg-white text-[#0000A3] font-semibold text-sm py-2.5 px-6 rounded-lg hover:bg-slate-100 transition shadow-md disabled:opacity-50 text-center"
         >
           {isLoading ? "Executing..." : "Approve"}
         </button>

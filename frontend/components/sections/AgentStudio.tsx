@@ -282,7 +282,7 @@ export default function AgentStudio({
         <button
           onClick={handleResetSession}
           disabled={isProcessing}
-          className="text-xs text-[#94a3b8] hover:text-white bg-[#11131c] hover:bg-[#1c1c2e] border border-[#1e2230] px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-sm"
+          className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-card)] hover:bg-[var(--bg-pill)] border border-[var(--border-color)] px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 shadow-[var(--card-shadow)]"
           title="Reset conversation and start fresh session"
         >
           <span>↺</span>
@@ -290,22 +290,28 @@ export default function AgentStudio({
         </button>
       </div>
 
-      {/* Emergency Halt Banner */}
+      {/* Emergency Halt Banner (Variant A: Solid #E24B4A fill + glow ring) */}
       {isSystemHalted && (
-        <div className="bg-red-500/15 border border-red-500/40 text-red-400 px-4 py-2.5 rounded-lg text-xs mb-3">
-          🚨 EMERGENCY SYSTEM HALT ACTIVE — ALL AUTONOMOUS PAYMENTS & CART RESERVATIONS FROZEN (POST /api/agent-halt).
+        <div className="bg-[#E24B4A] border border-[#E24B4A] text-white font-semibold px-4 py-2.5 rounded-lg text-xs mb-3 shadow-[0_0_0_3px_rgba(226,75,74,0.25)] flex items-center justify-between transition-all">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">🚨</span>
+            <span>EMERGENCY SYSTEM HALT ACTIVE — ALL AUTONOMOUS PAYMENTS & CART RESERVATIONS FROZEN (POST /api/agent-halt)</span>
+          </div>
+          <span className="bg-white text-[#E24B4A] px-2 py-0.5 rounded font-black text-[10px] tracking-wider uppercase">
+            FROZEN
+          </span>
         </div>
       )}
 
       {/* Scenario Quick Action Chips (Always accessible) */}
-      <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-[#1e2230]/50">
-        <span className="text-[10px] uppercase font-semibold text-[#6b6f85] tracking-wider mr-1">
+      <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-[var(--border-color)]/60">
+        <span className="text-[10px] uppercase font-semibold text-[var(--text-muted)] tracking-wider mr-1">
           Scenarios:
         </span>
         <button
           onClick={() => handleSendPrompt("Get a caffeine-free herbal tea for sleep under ₹500")}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
-          className="bg-[#11131c] border border-[#1e2230] hover:border-[#00baf2]/60 hover:bg-[#161926] text-[11px] text-[#d4d4d8] py-1 px-2.5 rounded-md transition disabled:opacity-40"
+          className="bg-[var(--scenario-btn-bg)] border border-[var(--border-color)] hover:border-[#00baf2]/60 hover:bg-[var(--bg-pill)] text-[11px] text-[var(--text-primary)] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] disabled:opacity-40"
         >
           1. Sleep tea (₹380)
         </button>
@@ -315,7 +321,7 @@ export default function AgentStudio({
             handleSendPrompt("Buy Japanese Ceremonial Matcha Grade-A");
           }}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
-          className="bg-[#11131c] border border-amber-500/30 hover:border-amber-500 hover:bg-[#161926] text-[11px] text-amber-400 py-1 px-2.5 rounded-md transition disabled:opacity-40"
+          className="bg-[var(--amber-bg)] border border-[var(--amber-border)] hover:border-[var(--amber-text)] text-[11px] text-[var(--amber-text)] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] font-medium disabled:opacity-40"
         >
           2. Matcha Upsell (₹950 vs ₹500 cap)
         </button>
@@ -325,14 +331,14 @@ export default function AgentStudio({
             handleSendPrompt("Buy 1 Kahwa and 1 Darjeeling");
           }}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
-          className="bg-[#11131c] border border-[#1e2230] hover:border-[#00baf2]/60 hover:bg-[#161926] text-[11px] text-[#d4d4d8] py-1 px-2.5 rounded-md transition disabled:opacity-40"
+          className="bg-[var(--scenario-btn-bg)] border border-[var(--border-color)] hover:border-[#00baf2]/60 hover:bg-[var(--bg-pill)] text-[11px] text-[var(--text-primary)] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] disabled:opacity-40"
         >
           3. Multi-Item (₹1500 cap)
         </button>
         <button
           onClick={handleFailoverSim}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
-          className="bg-[#11131c] border border-[#00baf2]/30 hover:border-[#00baf2] hover:bg-[#161926] text-[11px] text-[#00baf2] py-1 px-2.5 rounded-md transition disabled:opacity-40"
+          className="bg-[var(--scenario-btn-bg)] border border-[#00baf2]/30 hover:border-[#00baf2] hover:bg-[var(--bg-pill)] text-[11px] text-[#00baf2] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] disabled:opacity-40"
         >
           4. Cross-Store Failover
         </button>
@@ -346,10 +352,10 @@ export default function AgentStudio({
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[85%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+              className={`max-w-[85%] rounded-xl px-4 py-3 text-sm leading-relaxed shadow-[var(--card-shadow)] ${
                 msg.role === "user"
-                  ? "bg-[#1c1c2e] text-white border border-[#2a2e42]"
-                  : "bg-[#11131c] text-[#d4d4d8] border border-[#1e2230]"
+                  ? "bg-[var(--chat-user-bg)] text-[var(--chat-user-text)] border border-[var(--chat-user-border)]"
+                  : "bg-[var(--chat-agent-bg)] text-[var(--chat-agent-text)] border border-[var(--chat-agent-border)]"
               }`}
             >
               <FormattedChatMessage content={msg.content} role={msg.role} />
@@ -376,7 +382,7 @@ export default function AgentStudio({
 
         {/* Decline Feedback Banner */}
         {declineFeedback && (
-          <div className="bg-red-500/10 border-l-4 border-red-500 text-red-400 text-xs px-4 py-2.5 rounded-r-lg animate-decline-slide">
+          <div className="bg-[var(--danger-bg)] border-l-4 border-[#E24B4A] text-[var(--danger-text)] text-xs px-4 py-2.5 rounded-r-lg animate-decline-slide shadow-[var(--card-shadow)] font-medium">
             ⚠️ {declineFeedback}
           </div>
         )}
@@ -438,12 +444,12 @@ export default function AgentStudio({
                 ? "System halted — resume kill switch in sidebar to chat..."
                 : "Enter purchase goal or ask why a decision was made..."
             }
-            className="w-full bg-[#11131c] border border-[#1e2230] rounded-xl px-4 py-3.5 text-sm text-white placeholder-[#64748b] focus:outline-none focus:border-[#00baf2] disabled:opacity-50 disabled:cursor-not-allowed transition pr-12"
+            className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-xl px-4 py-3.5 text-sm text-[var(--input-text)] placeholder-[var(--input-placeholder)] focus:outline-none focus:border-[#00baf2] disabled:opacity-50 disabled:cursor-not-allowed transition pr-12 shadow-[var(--card-shadow)]"
           />
           <button
             type="submit"
             disabled={!inputValue.trim() || isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 bg-[#1c1c2e] hover:bg-[#25253e] disabled:opacity-30 disabled:hover:bg-[#1c1c2e] text-white p-2 rounded-lg transition"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 bg-[var(--bg-pill)] hover:bg-[var(--bg-pill-hover)] border border-[var(--border-subtle)] disabled:opacity-30 text-[var(--text-primary)] p-2 rounded-lg transition"
           >
             ↑
           </button>

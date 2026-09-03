@@ -30,7 +30,7 @@ export default function FormattedChatMessage({ content, role }: FormattedChatMes
       if (part.startsWith("**") && part.endsWith("**")) {
         const boldText = part.slice(2, -2);
         return (
-          <strong key={index} className="font-semibold text-white">
+          <strong key={index} className="font-semibold text-[var(--text-primary)]">
             {boldText}
           </strong>
         );
@@ -49,7 +49,7 @@ export default function FormattedChatMessage({ content, role }: FormattedChatMes
               return (
                 <span
                   key={cIndex}
-                  className="font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded text-xs font-semibold inline-block mx-0.5"
+                  className="font-mono text-[var(--success-text)] bg-[var(--success-bg)] border border-[var(--success-border)] px-1.5 py-0.5 rounded text-xs font-semibold inline-block mx-0.5"
                 >
                   {formattedPrice}
                 </span>
@@ -73,7 +73,7 @@ export default function FormattedChatMessage({ content, role }: FormattedChatMes
         </div>
       )}
 
-      <div className="text-sm leading-relaxed text-[#d4d4d8] space-y-1.5">
+      <div className="text-sm leading-relaxed text-[var(--text-primary)] space-y-1.5">
         {lines.map((line, lIdx) => (
           <div key={lIdx}>
             {line.trim().startsWith("•") || line.trim().startsWith("-") ? (

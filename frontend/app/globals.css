@@ -2,15 +2,123 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --bg-dark: #090a0f;
+:root,
+[data-theme="dark"] {
+  --bg-main: #090a0f;
+  --bg-sidebar: #0c0c14;
+  --bg-card: #11131c;
+  --bg-card-subtle: #181a26;
+  --bg-pill: #1c1c2e;
+  --bg-pill-hover: #151522;
+  --border-color: #1e2230;
+  --border-subtle: #2a2e42;
+  --text-primary: #ffffff;
+  --text-secondary: #6b6f85;
+  --text-muted: #6b6f85;
+  --card-shadow: none;
+  --gating-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+
+  --meta-bg: rgba(15, 23, 42, 0.6);
+  --meta-border: #1e2230;
+  --meta-text: #94a3b8;
+
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --success-border: rgba(16, 185, 129, 0.3);
+  --success-text: #34d399;
+
+  --danger-bg: rgba(239, 68, 68, 0.1);
+  --danger-border: rgba(239, 68, 68, 0.3);
+  --danger-text: #f87171;
+
+  --amber-bg: rgba(245, 158, 11, 0.1);
+  --amber-border: rgba(245, 158, 11, 0.3);
+  --amber-text: #fbbf24;
+
+  --chat-user-bg: #1c1c2e;
+  --chat-user-border: #2a2e42;
+  --chat-user-text: #ffffff;
+
+  --chat-agent-bg: #11131c;
+  --chat-agent-border: #1e2230;
+  --chat-agent-text: #d4d4d8;
+
+  --input-bg: #11131c;
+  --input-border: #1e2230;
+  --input-text: #ffffff;
+  --input-placeholder: #64748b;
+
+  --failover-bg: #0b0c16;
+  --failover-border: #1b1e2e;
+  --failover-storea-bg: #181115;
+  --failover-storeb-bg: #0b1c18;
+
+  --table-header-bg: #0c0c14;
+  --table-row-hover: #161926;
+  --code-bg: #0c0c14;
+  --scenario-btn-bg: #11131c;
+}
+
+[data-theme="light"] {
+  --bg-main: #f7f7fb;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-subtle: #f4f4f8;
+  --bg-pill: #eef0f8;
+  --bg-pill-hover: #f0f1f7;
+  --border-color: #e2e2ee;
+  --border-subtle: #d8d8e5;
+  --text-primary: #14141f;
+  --text-secondary: #7a7a8c;
+  --text-muted: #7a7a8c;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.02);
+  --gating-shadow: 0 10px 25px -3px rgba(0, 0, 163, 0.28), 0 4px 10px -2px rgba(0, 0, 163, 0.15);
+
+  --meta-bg: #eef7fb;
+  --meta-border: #d6e8f0;
+  --meta-text: #3b6982;
+
+  --success-bg: #eafaf3;
+  --success-border: #b8ead4;
+  --success-text: #0f8a5f;
+
+  --danger-bg: #fdeaea;
+  --danger-border: #f2c9c9;
+  --danger-text: #c53030;
+
+  --amber-bg: #fff8ea;
+  --amber-border: #f0dfa8;
+  --amber-text: #a67c00;
+
+  --chat-user-bg: #e8ebf7;
+  --chat-user-border: #d0d5ea;
+  --chat-user-text: #14141f;
+
+  --chat-agent-bg: #ffffff;
+  --chat-agent-border: #e2e2ee;
+  --chat-agent-text: #2d2d3a;
+
+  --input-bg: #ffffff;
+  --input-border: #e2e2ee;
+  --input-text: #14141f;
+  --input-placeholder: #8e8ea0;
+
+  --failover-bg: #ffffff;
+  --failover-border: #e2e2ee;
+  --failover-storea-bg: #fff5f5;
+  --failover-storeb-bg: #f0fdf4;
+
+  --table-header-bg: #f8f9fd;
+  --table-row-hover: #f3f4fa;
+  --code-bg: #f4f4f8;
+  --scenario-btn-bg: #ffffff;
 }
 
 body {
-  background-color: #090a0f;
-  color: #f4f4f5;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
   font-family: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Custom minimal scrollbar */
@@ -19,14 +127,14 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0c0c14;
+  background: var(--bg-sidebar);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e2230;
+  background: var(--border-subtle);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a2e42;
+  background: var(--text-secondary);
 }
 
 /* Keyframe Animations */

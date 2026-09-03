@@ -15,13 +15,13 @@ export default function LiveReasoningTrace({ currentStepIndex }: LiveReasoningTr
   ];
 
   return (
-    <div className="bg-[#11131c] border border-[#1e2230] rounded-xl p-4 my-3 max-w-[540px] shadow-lg space-y-3">
-      <div className="flex items-center justify-between border-b border-[#1e2230] pb-2">
+    <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-4 my-3 max-w-[540px] shadow-[var(--card-shadow)] space-y-3 transition-colors">
+      <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
         <span className="text-[11px] uppercase font-semibold text-[#00baf2] tracking-wider flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-[#00baf2] animate-ping"></span>
           <span>Live Agent Reasoning Trace</span>
         </span>
-        <span className="text-[10px] font-mono text-[#64748b]">
+        <span className="text-[10px] font-mono text-[var(--text-muted)]">
           Step {Math.min(currentStepIndex + 1, steps.length)} of {steps.length}
         </span>
       </div>
@@ -36,13 +36,13 @@ export default function LiveReasoningTrace({ currentStepIndex }: LiveReasoningTr
             <div
               key={step.title}
               className={`flex items-start gap-3 transition-opacity duration-200 ${
-                isPending ? "opacity-35 text-[#6b6f85]" : "opacity-100 text-[#f4f4f5]"
+                isPending ? "opacity-40 text-[var(--text-muted)]" : "opacity-100 text-[var(--text-primary)]"
               }`}
             >
               {/* Icon container */}
               <div className="mt-0.5 shrink-0">
                 {isCompleted && (
-                  <div className="w-4 h-4 rounded-full bg-[#10b981]/20 border border-[#10b981] text-[#10b981] flex items-center justify-center text-[10px] font-bold">
+                  <div className="w-4 h-4 rounded-full bg-[var(--success-bg)] border border-[var(--success-border)] text-[var(--success-text)] flex items-center justify-center text-[10px] font-bold">
                     ✓
                   </div>
                 )}
@@ -50,7 +50,7 @@ export default function LiveReasoningTrace({ currentStepIndex }: LiveReasoningTr
                   <div className="w-4 h-4 rounded-full border-2 border-[#00baf2] border-t-transparent animate-spin"></div>
                 )}
                 {isPending && (
-                  <div className="w-4 h-4 rounded-full border border-[#2a2e42] flex items-center justify-center text-[8px] text-[#6b6f85]">
+                  <div className="w-4 h-4 rounded-full border border-[var(--border-subtle)] flex items-center justify-center text-[8px] text-[var(--text-muted)]">
                     ○
                   </div>
                 )}

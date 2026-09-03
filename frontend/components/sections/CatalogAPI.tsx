@@ -41,22 +41,22 @@ export default function CatalogAPI() {
   return (
     <div className="space-y-6 max-w-[1200px]">
       <div>
-        <h2 className="text-lg font-semibold text-white">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Federated Multi-Merchant Product Network
         </h2>
-        <p className="text-xs text-[#64748b] mt-0.5">
+        <p className="text-xs text-[var(--text-secondary)] mt-0.5">
           Structured JSON attributes consumed directly by autonomous AI buyer agents across federated partner stores.
         </p>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-[#1e2230] pb-2">
+      <div className="flex gap-2 border-b border-[var(--border-color)] pb-2">
         <button
           onClick={() => setActiveTab("storeA")}
           className={`text-xs px-3 py-1.5 rounded-md transition font-medium ${
             activeTab === "storeA"
-              ? "bg-[#1c1c2e] text-white"
-              : "text-[#6b6f85] hover:text-[#d4d4d8]"
+              ? "bg-[var(--bg-pill)] text-[var(--text-primary)] shadow-[var(--card-shadow)]"
+              : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           }`}
         >
           Store A: Aura Artisan Teas (Primary)
@@ -65,8 +65,8 @@ export default function CatalogAPI() {
           onClick={() => setActiveTab("storeB")}
           className={`text-xs px-3 py-1.5 rounded-md transition font-medium ${
             activeTab === "storeB"
-              ? "bg-[#1c1c2e] text-white"
-              : "text-[#6b6f85] hover:text-[#d4d4d8]"
+              ? "bg-[var(--bg-pill)] text-[var(--text-primary)] shadow-[var(--card-shadow)]"
+              : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           }`}
         >
           Store B: Botanical Leaf Co. (Federated Partner)
@@ -75,7 +75,7 @@ export default function CatalogAPI() {
 
       {/* Products Grid */}
       {loading ? (
-        <div className="text-xs text-[#64748b] py-8">Loading product catalog...</div>
+        <div className="text-xs text-[var(--text-secondary)] py-8">Loading product catalog...</div>
       ) : activeTab === "storeA" ? (
         <div className="grid grid-cols-4 gap-4">
           {storeAProducts.map((p) => (
@@ -91,21 +91,21 @@ export default function CatalogAPI() {
       )}
 
       {/* Agent Spec Discovery */}
-      <div className="pt-4 border-t border-[#1e2230]">
+      <div className="pt-4 border-t border-[var(--border-color)]">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">
             Agent API Metadata Discovery (<code className="font-mono text-xs text-[#00baf2]">GET /agent-spec</code>)
           </h3>
           <button
             onClick={handleFetchSpec}
-            className="text-xs bg-[#1c1c2e] hover:bg-[#25253e] text-white px-3 py-1.5 rounded-md border border-[#2a2e42] transition"
+            className="text-xs bg-[var(--bg-card)] hover:bg-[var(--bg-pill)] text-[var(--text-primary)] px-3 py-1.5 rounded-md border border-[var(--border-color)] transition shadow-[var(--card-shadow)]"
           >
             Fetch Agent Specification
           </button>
         </div>
 
         {agentSpec && (
-          <pre className="bg-[#0c0c14] border border-[#1e2230] p-4 rounded-xl text-xs font-mono text-[#34d399] overflow-x-auto max-h-[300px]">
+          <pre className="bg-[var(--code-bg)] border border-[var(--border-color)] p-4 rounded-xl text-xs font-mono text-[var(--success-text)] overflow-x-auto max-h-[300px] shadow-[var(--card-shadow)]">
             {JSON.stringify(agentSpec, null, 2)}
           </pre>
         )}

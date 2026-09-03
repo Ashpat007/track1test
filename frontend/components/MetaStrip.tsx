@@ -2,12 +2,12 @@ import React from "react";
 
 export default function MetaStrip() {
   return (
-    <div className="bg-[#0f172a]/60 border border-[#1e2230] px-4 py-2 rounded-lg text-xs text-[#94a3b8] font-mono mb-5 flex items-center gap-3 w-fit">
+    <div className="bg-[var(--meta-bg)] border border-[var(--meta-border)] px-4 py-2 rounded-lg text-xs text-[var(--meta-text)] font-mono mb-2 flex items-center gap-3 w-fit shadow-[var(--card-shadow)] transition-colors">
       <span>INR</span>
-      <span className="text-[#334155]">·</span>
+      <span className="opacity-40">·</span>
       <span>15 min reservation</span>
-      <span className="text-[#334155]">·</span>
-      <span className="text-[#10b981] font-medium">Guardrails active</span>
+      <span className="opacity-40">·</span>
+      <span className="text-[var(--success-text)] font-medium">Guardrails active</span>
     </div>
   );
 }

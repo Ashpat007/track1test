@@ -13,6 +13,11 @@ export default function Home() {
   const [spendingCap, setSpendingCap] = useState(500.0);
   const [gatingMode, setGatingMode] = useState("Human Review Gate");
   const [isSystemHalted, setIsSystemHalted] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
 
   useEffect(() => {
     async function checkStatus() {
@@ -43,7 +48,12 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#090a0f]">
+    <div
+      data-theme={theme}
+      className={`flex min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)] transition-colors duration-200 ${
+        theme === "light" ? "light" : "dark"
+      }`}
+    >
       {/* Sidebar Component matching reference image exactly */}
       <Sidebar
         activeNav={activeNav}
@@ -54,6 +64,8 @@ export default function Home() {
         setGatingMode={setGatingMode}
         isSystemHalted={isSystemHalted}
         toggleSystemHalt={toggleSystemHalt}
+        theme={theme}
+        toggleTheme={toggleTheme}
       />
 
       {/* Main Content Area */}

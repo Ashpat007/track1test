@@ -22,7 +22,7 @@ from merchant_api.models import (
 from merchant_api.razorpay_client import RazorpayService
 from buyer_agent.agent import BuyerAgent
 from buyer_agent.llm_reasoner import LLMReasoner, AgentChoice, AgentItemSelection
-from guardrails.audit import SessionLocal, AuditLogRecord
+from guardrails.audit import SessionLocal, AuditLogRecord, AuditLogger
 
 app = FastAPI(
     title="Aura Artisan Teas - Merchant Agentic API",
@@ -510,10 +510,21 @@ def confirm_gating_api(payload: ConfirmGatingInput):
     
     proposal = PENDING_PROPOSALS.pop(payload.session_id)
     if not payload.approved:
+        logger = AuditLogger(session_id=payload.session_id)
+        logger.log_step(
+            "USER_GATING",
+            agent_goal=proposal.get("goal"),
+            proposed_action=f"Clear purchase of {proposal.get('summary_names')}",
+            spending_cap_inr=proposal.get("spending_cap_inr"),
+            proposed_amount_inr=proposal.get("total_amount_inr"),
+            guardrail_passed=True,
+            guardrail_message="User explicitly clicked 'Deny' at Human Review Gate.",
+            gate_status="DENIED",
+            outcome_status="USER_DENIED"
+        )
         return {"success": False, "status": "REJECTED_BY_USER", "message": "User denied gating clearance."}
 
     if proposal.get("is_federated"):
-        from guardrails.audit import AuditLogger
         agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=proposal["spending_cap_inr"], gating_mode="AUTO_APPROVE")
         logger = AuditLogger(session_id=proposal["session_id"])
         res = agent.execute_merchant_b_purchase(agent_goal=proposal["goal"], session_id=proposal["session_id"], logger=logger)
@@ -538,6 +549,17 @@ class AgentStudioChatInput(BaseModel):
 def agent_studio_chat_api(payload: AgentStudioChatInput):
     try:
         if AGENT_SYSTEM_HALTED:
+            logger = AuditLogger(session_id=f"sess_halt_{uuid.uuid4().hex[:8]}")
+            logger.log_step(
+                "GUARDRAIL_EVALUATION",
+                agent_goal=payload.message,
+                proposed_action="Autonomous purchase attempt",
+                spending_cap_inr=payload.spending_cap_inr,
+                guardrail_passed=False,
+                guardrail_message="EMERGENCY SYSTEM HALT ACTIVE: Kill switch has frozen all autonomous purchases.",
+                gate_status="FROZEN",
+                outcome_status="EMERGENCY_BLOCKED"
+            )
             return {
                 "type": "error",
                 "message": "EMERGENCY SYSTEM HALT ACTIVE: All autonomous transactions and reservations are currently frozen."
@@ -736,6 +758,21 @@ def execute_upsell_api(payload: UpsellExecuteInput):
         agent = BuyerAgent(merchant_base_url="http://127.0.0.1:8000", spending_cap_inr=new_cap, gating_mode="AUTO_APPROVE")
         res = agent.execute_preapproved_choice(choice=up_choice, agent_goal=payload.user_prompt)
         return {"success": True, "result": res, "new_cap": new_cap}
+
+    if payload.option == "C":
+        logger = AuditLogger(session_id=f"sess_up_{uuid.uuid4().hex[:8]}")
+        logger.log_step(
+            "USER_GATING",
+            agent_goal=payload.user_prompt,
+            proposed_action=f"Upsell rejected for {up.get('breached_product_name')}",
+            spending_cap_inr=500.0,
+            proposed_amount_inr=up.get("breached_product_price_inr"),
+            guardrail_passed=False,
+            guardrail_message=f"Cart price ₹{up.get('breached_product_price_inr')} exceeded cap. User declined both alternative and cap upgrade.",
+            gate_status="ABORTED",
+            outcome_status="USER_DECLINED"
+        )
+        return {"success": False, "status": "USER_DECLINED", "message": "User declined upsell proposal."}
 
     return {"success": False, "message": "Unknown option"}
 
