@@ -70,7 +70,7 @@ export default function AgentStudio({
     scrollToBottom();
   }, [messages, pendingGating, pendingUpsell, pipelineStepIndex]);
 
-  const handleSendPrompt = async (promptText: string) => {
+  const handleSendPrompt = async (promptText: string, overrideCap?: number) => {
     if (!promptText.trim() || isProcessing || pendingGating || pendingUpsell) return;
 
     setDeclineFeedback(null);
@@ -90,7 +90,8 @@ export default function AgentStudio({
 
     try {
       const cleanHistory = messages.map((m) => ({ role: m.role, content: m.content }));
-      const resp = await sendAgentStudioChat(promptText, spendingCap, gatingMode, cleanHistory);
+      const activeCap = overrideCap !== undefined ? overrideCap : spendingCap;
+      const resp = await sendAgentStudioChat(promptText, activeCap, gatingMode, cleanHistory);
 
       clearTimeout(t1);
       clearTimeout(t2);
@@ -271,7 +272,7 @@ export default function AgentStudio({
   const handleFailoverSim = async () => {
     setSpendingCap(500);
     await simulateStockout("tea-001");
-    handleSendPrompt("Buy Kashmir Kahwa Saffron Blend");
+    handleSendPrompt("Buy Kashmir Kahwa Saffron Blend", 500);
   };
 
   return (
@@ -309,7 +310,10 @@ export default function AgentStudio({
           Scenarios:
         </span>
         <button
-          onClick={() => handleSendPrompt("Get a caffeine-free herbal tea for sleep under ₹500")}
+          onClick={() => {
+            setSpendingCap(500);
+            handleSendPrompt("Get a caffeine-free herbal tea for sleep under ₹500", 500);
+          }}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
           className="bg-[var(--scenario-btn-bg)] border border-[var(--border-color)] hover:border-[#00baf2]/60 hover:bg-[var(--bg-pill)] text-[11px] text-[var(--text-primary)] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] disabled:opacity-40"
         >
@@ -318,7 +322,7 @@ export default function AgentStudio({
         <button
           onClick={() => {
             setSpendingCap(500);
-            handleSendPrompt("Buy Japanese Ceremonial Matcha Grade-A");
+            handleSendPrompt("Buy Japanese Ceremonial Matcha Grade-A", 500);
           }}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
           className="bg-[var(--amber-bg)] border border-[var(--amber-border)] hover:border-[var(--amber-text)] text-[11px] text-[var(--amber-text)] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] font-medium disabled:opacity-40"
@@ -328,7 +332,7 @@ export default function AgentStudio({
         <button
           onClick={() => {
             setSpendingCap(1500);
-            handleSendPrompt("Buy 1 Kahwa and 1 Darjeeling");
+            handleSendPrompt("Buy 1 Kahwa and 1 Darjeeling", 1500);
           }}
           disabled={isProcessing || pendingGating !== null || pendingUpsell !== null || isSystemHalted}
           className="bg-[var(--scenario-btn-bg)] border border-[var(--border-color)] hover:border-[#00baf2]/60 hover:bg-[var(--bg-pill)] text-[11px] text-[var(--text-primary)] py-1 px-2.5 rounded-md transition shadow-[var(--card-shadow)] disabled:opacity-40"
